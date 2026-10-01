@@ -1,6 +1,7 @@
 # Copyright (c) 2025, AgriTheory and contributors
 # For license information, please see license.txt
 
+import copy
 import datetime
 import json
 from typing import Any
@@ -11,6 +12,13 @@ from erpnext.stock.get_item_details import get_item_details, get_valuation_rate
 from frappe.query_builder import Case, DocType
 from frappe.query_builder.custom import ConstantColumn
 from frappe.query_builder.functions import Coalesce
+
+from beam.beam.bundle import (
+	get_bundle_leaves,
+	get_leaf_balances,
+	get_packed_row_details,
+	is_container,
+)
 
 
 # Frappe v16 rejects string-form SQL functions in SELECT and requires the dict form; v15 has no
@@ -131,6 +139,10 @@ def get_barcode_context(barcode: str) -> frappe._dict | None:
 def get_handling_unit(
 	handling_unit: str, parent_doctype: str | None = None, inv_dims: list | None = None
 ) -> frappe._dict:
+	"""
+	The stock a Handling Unit holds, from its ledger entries. Returns None for a bundle, which
+	never holds stock of its own: use `beam.beam.bundle.get_bundle_leaves` for its contents.
+	"""
 	sl_entries = frappe.get_all(
 		"Stock Ledger Entry",
 		filters={"handling_unit": handling_unit, "is_cancelled": 0},
@@ -222,6 +234,12 @@ def get_stock_entry_item_details(doc: dict, item_code: str) -> frappe._dict:
 
 
 def get_list_action(barcode_doc: frappe._dict, context: frappe._dict) -> list[dict[str, Any]]:
+	if barcode_doc.doc.doctype == "Handling Unit":
+		if context.listview == "Handling Unit Bundle Entry":
+			return get_bundle_entry_list_action(barcode_doc.doc.name)
+		if is_container([barcode_doc.doc.name]):
+			return get_container_list_actions(barcode_doc.doc.name, context)
+
 	target = barcode_doc.doc.name
 	if barcode_doc.doc.doctype == "Handling Unit":
 		if barcode_doc.doc.get("parenttype") == "Packing Slip":
@@ -266,6 +284,26 @@ def get_list_action(barcode_doc: frappe._dict, context: frappe._dict) -> list[di
 	return actions
 
 
+def get_bundle_entry_list_action(handling_unit: str) -> list[dict[str, Any]]:
+	"""Entries that built a scanned bundle, or that packed a scanned Handling Unit"""
+	if is_container([handling_unit]):
+		filter_on = {"doctype": "Handling Unit Bundle Entry", "field": "handling_unit"}
+	else:
+		filter_on = {"doctype": "Packed Handling Unit", "field": "container_handling_unit"}
+	return [{"action": "filter", **filter_on, "context": handling_unit, "target": handling_unit}]
+
+
+def get_container_list_actions(bundle: str, context: frappe._dict) -> list[dict[str, Any]]:
+	"""A scanned bundle filters to every document referencing anything inside it"""
+	filter_on = container_listview.get(context.listview)
+	leaves = get_bundle_leaves(bundle)
+	if not filter_on or not leaves:
+		return []
+	if filter_on["field"] in ("item_code", "name"):
+		leaves = sorted({balance.item_code for balance in get_leaf_balances(leaves).values()})
+	return [{"action": "filter", "operator": "in", **filter_on, "context": leaves, "target": leaves}]
+
+
 def set_item_stock_uom(target: frappe._dict, item_code: str) -> None:
 	stock_uom = frappe.get_cached_value("Item", item_code, "stock_uom")
 	if stock_uom:
@@ -274,6 +312,12 @@ def set_item_stock_uom(target: frappe._dict, item_code: str) -> None:
 
 
 def get_form_action(barcode_doc: frappe._dict, context: frappe._dict) -> list[dict[str, Any]]:
+	if barcode_doc.doc.doctype == "Handling Unit":
+		if context.frm == "Handling Unit Bundle Entry":
+			return get_bundle_entry_form_action(barcode_doc.doc.name)
+		if is_container([barcode_doc.doc.name]):
+			return get_container_form_actions(barcode_doc.doc.name, context)
+
 	target = None
 	beam_override = frappe.get_hooks("beam_frm")
 	has_frm_override = bool(
@@ -430,6 +474,30 @@ def get_form_action(barcode_doc: frappe._dict, context: frappe._dict) -> list[di
 	return actions
 
 
+def get_bundle_entry_form_action(handling_unit: str) -> list[dict[str, Any]]:
+	"""On a Bundle Entry a scan adds what was scanned as one row, whether it holds stock or is a bundle"""
+	target = get_packed_row_details(handling_unit)
+	target.update(packed_doctype="Handling Unit", packed_handling_unit=handling_unit)
+	actions = copy.deepcopy(frm["Handling Unit"]["Handling Unit Bundle Entry"])
+	for action in actions:
+		action["context"] = target
+		action["target"] = target.get(action["target"].split(".")[1])
+	return actions
+
+
+def get_container_form_actions(bundle: str, context: frappe._dict) -> list[dict[str, Any]]:
+	"""
+	A bundle holds no stock of its own, so scanning one onto a transaction adds a row for every
+	Handling Unit inside it, at any depth, each with its own quantity, warehouse and dimensions
+	"""
+	actions = []
+	for leaf in get_bundle_leaves(bundle):
+		leaf_doc = frappe._dict(doc=frappe.get_doc("Handling Unit", leaf), barcode=leaf)
+		# the action configs are shared module state rewritten on every call, so keep a copy
+		actions.extend(copy.deepcopy(get_form_action(leaf_doc, context)))
+	return actions
+
+
 def get_serial_no(serial_no: str, parent_doctype: str | None = None) -> frappe._dict:
 	sle = DocType("Stock Ledger Entry")
 	snb = DocType("Serial and Batch Entry")
@@ -547,6 +615,14 @@ def get_serial_no(serial_no: str, parent_doctype: str | None = None) -> frappe._
 
 listview = {
 	"Handling Unit": {
+		"Handling Unit Bundle Entry": [
+			{
+				"action": "filter",
+				"doctype": "Packed Handling Unit",
+				"field": "container_handling_unit",
+				"target": "target",
+			}
+		],
 		"Delivery Note": [
 			{"action": "filter", "doctype": "Delivery Note", "field": "name", "target": "target"}
 		],
@@ -747,6 +823,15 @@ listview = {
 
 frm = {
 	"Handling Unit": {
+		"Handling Unit Bundle Entry": [
+			{
+				"action": "add_packed_handling_unit",
+				"doctype": "Packed Handling Unit",
+				"field": "packed_handling_unit",
+				"target": "target.packed_handling_unit",
+				"context": "target",
+			},
+		],
 		"Delivery Note": [
 			{
 				"action": "add_or_associate",
@@ -1260,4 +1345,18 @@ frm = {
 			},
 		],
 	},
+}
+
+# where a scanned bundle's contents are referenced, per list view
+container_listview = {
+	"Delivery Note": {"doctype": "Delivery Note Item", "field": "handling_unit"},
+	"Item": {"doctype": "Item", "field": "name"},
+	"Packing Slip": {"doctype": "Packing Slip Item", "field": "handling_unit"},
+	"Purchase Invoice": {"doctype": "Purchase Invoice Item", "field": "handling_unit"},
+	"Purchase Receipt": {"doctype": "Purchase Receipt Item", "field": "handling_unit"},
+	"Putaway Rule": {"doctype": "Putaway Rule", "field": "item_code"},
+	"Quality Inspection": {"doctype": "Quality Inspection", "field": "handling_unit"},
+	"Sales Invoice": {"doctype": "Sales Invoice Item", "field": "handling_unit"},
+	"Stock Entry": {"doctype": "Stock Entry Detail", "field": "handling_unit"},
+	"Stock Reconciliation": {"doctype": "Stock Reconciliation Item", "field": "handling_unit"},
 }

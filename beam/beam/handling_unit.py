@@ -6,6 +6,7 @@ import frappe
 from erpnext.stock.stock_ledger import NegativeStockError
 from frappe.utils import flt
 
+from beam.beam.bundle import is_container
 from beam.beam.doctype.beam_settings.beam_settings import create_beam_settings
 from beam.beam.scan import get_handling_unit
 
@@ -120,10 +121,15 @@ def validate_handling_unit_overconsumption(doc, method=None):
 		return doc
 
 	qty_field = "transfer_qty" if doc.doctype == "Stock Entry" else "stock_qty"
+	# a bundle holds no stock to overconsume; the bundle guard already keeps it off rows, and this
+	# keeps the check honest against values written to the field directly
+	bundles = is_container([row.get("handling_unit") for row in doc.get("items")])
 
 	for row in doc.get("items"):
 		error = False
 		if not hasattr(row, "handling_unit") or not row.handling_unit:
+			continue
+		if row.handling_unit in bundles:
 			continue
 
 		hu = get_handling_unit(row.handling_unit)

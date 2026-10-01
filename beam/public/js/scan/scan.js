@@ -114,7 +114,7 @@ class ScanHandler {
 	}
 	filter(barcode_context) {
 		const filters_to_apply = barcode_context.map(filterset => {
-			window.fltr.add_filter(filterset.doctype, filterset.field, '=', filterset.target)
+			window.fltr.add_filter(filterset.doctype, filterset.field, filterset.operator || '=', filterset.target)
 		})
 		Promise.all(filters_to_apply).then(() => {
 			window.fltr.apply()
@@ -137,10 +137,16 @@ class ScanHandler {
 							'Manufacture',
 						].includes(cur_frm.doc.stock_entry_type)
 					) {
-						return row.item_code == field.context.item_code || row.handling_unit
+						// match this action's own Handling Unit, so a scanned bundle's contents each get a row
+						return (
+							(row.item_code == field.context.item_code && !row.handling_unit) ||
+							row.handling_unit == field.context.handling_unit
+						)
 					}
 					return (
-						(row.item_code == field.context.item_code && row.stock_qty == field.context.stock_qty) ||
+						(row.item_code == field.context.item_code &&
+							row.stock_qty == field.context.stock_qty &&
+							!row.handling_unit) ||
 						row.handling_unit == field.context.handling_unit
 					)
 				})
@@ -170,7 +176,9 @@ class ScanHandler {
 						continue
 					}
 					if (
-						(row.item_code == field.context.item_code && row.stock_qty == field.context.stock_qty) ||
+						(row.item_code == field.context.item_code &&
+							row.stock_qty == field.context.stock_qty &&
+							!row.handling_unit) ||
 						row.handling_unit == field.context.handling_unit
 					) {
 						if (cur_frm.doc.doctype == 'Stock Entry') {
@@ -289,5 +297,19 @@ class ScanHandler {
 		barcode_context.forEach(action => {
 			cur_frm.set_value(action.field, action.target)
 		})
+	}
+	add_packed_handling_unit(barcode_context) {
+		barcode_context.forEach(action => {
+			if (cur_frm.doc.items.some(row => row.container_handling_unit == action.context.container_handling_unit)) {
+				frappe.show_alert({ message: __('{0} is already on this entry', [action.target]), indicator: 'orange' })
+				return
+			}
+			if (!cur_frm.doc.items.length || !cur_frm.doc.items[0].packed_handling_unit) {
+				cur_frm.doc.items = []
+			}
+			cur_frm.add_child('items', action.context)
+		})
+		cur_frm.refresh_field('items')
+		cur_frm.trigger('items_changed')
 	}
 }

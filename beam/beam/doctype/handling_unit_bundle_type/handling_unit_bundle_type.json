@@ -1,0 +1,144 @@
+{
+	"actions": [],
+	"allow_rename": 1,
+	"autoname": "field:bundle_type_name",
+	"creation": "2026-10-01 12:00:00.000000",
+	"description": "The kinds of physical container used at the site, and the rules for what each may hold. A type is what a container is, not how deep it sits, so the same type is valid at any level.",
+	"doctype": "DocType",
+	"editable_grid": 1,
+	"engine": "InnoDB",
+	"field_order": [
+		"bundle_type_name",
+		"disabled",
+		"policy_section",
+		"allowed_child_types",
+		"allow_loose_handling_units",
+		"require_uniform_members",
+		"column_break_policy",
+		"max_members",
+		"seal_when_contained",
+		"restrict_member_transactions"
+	],
+	"fields": [
+		{
+			"description": "The physical container kind: Box, Case, Pallet, Tote.",
+			"fieldname": "bundle_type_name",
+			"fieldtype": "Data",
+			"in_list_view": 1,
+			"label": "Bundle Type Name",
+			"reqd": 1,
+			"unique": 1
+		},
+		{
+			"default": "0",
+			"description": "Retire a type without affecting bundles that already reference it.",
+			"fieldname": "disabled",
+			"fieldtype": "Check",
+			"in_list_view": 1,
+			"label": "Disabled"
+		},
+		{
+			"fieldname": "policy_section",
+			"fieldtype": "Section Break",
+			"label": "Nesting Rules"
+		},
+		{
+			"description": "Bundle types permitted inside this one. Empty permits any.",
+			"fieldname": "allowed_child_types",
+			"fieldtype": "Table MultiSelect",
+			"label": "Allowed Child Types",
+			"options": "Handling Unit Bundle Type Link"
+		},
+		{
+			"default": "1",
+			"description": "Whether Handling Units holding stock may be placed directly inside. Clear on a Pallet to require that everything is boxed first.",
+			"fieldname": "allow_loose_handling_units",
+			"fieldtype": "Check",
+			"label": "Allow Loose Handling Units"
+		},
+		{
+			"default": "0",
+			"description": "Whether everything inside must be the same kind: all Handling Units holding stock, or all one bundle type.",
+			"fieldname": "require_uniform_members",
+			"fieldtype": "Check",
+			"label": "Require Uniform Members"
+		},
+		{
+			"fieldname": "column_break_policy",
+			"fieldtype": "Column Break"
+		},
+		{
+			"default": "0",
+			"description": "Maximum number of things permitted inside. Zero is unlimited. A count only; no volume or weight is enforced.",
+			"fieldname": "max_members",
+			"fieldtype": "Int",
+			"label": "Max Members",
+			"non_negative": 1
+		},
+		{
+			"default": "0",
+			"description": "Prevent a bundle of this type from being packed or unpacked while it is itself inside another bundle.",
+			"fieldname": "seal_when_contained",
+			"fieldtype": "Check",
+			"label": "Seal When Contained"
+		},
+		{
+			"default": "0",
+			"description": "Prevent the contents from being used on a stock transaction while still inside this bundle. Off by default, because staff legitimately open a carton and remove a single unit.",
+			"fieldname": "restrict_member_transactions",
+			"fieldtype": "Check",
+			"label": "Restrict Member Transactions"
+		}
+	],
+	"index_web_pages_for_search": 1,
+	"links": [],
+	"modified": "2026-10-01 12:00:00.000000",
+	"modified_by": "Administrator",
+	"module": "BEAM",
+	"name": "Handling Unit Bundle Type",
+	"naming_rule": "By fieldname",
+	"owner": "Administrator",
+	"permissions": [
+		{
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "Stock User",
+			"select": 1,
+			"share": 1
+		},
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"import": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "Stock Manager",
+			"select": 1,
+			"share": 1,
+			"write": 1
+		},
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"import": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "System Manager",
+			"select": 1,
+			"share": 1,
+			"write": 1
+		}
+	],
+	"sort_field": "modified",
+	"sort_order": "DESC",
+	"states": []
+}
