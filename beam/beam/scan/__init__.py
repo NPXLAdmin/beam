@@ -465,6 +465,9 @@ def get_form_action(barcode_doc: frappe._dict, context: frappe._dict) -> list[di
 		if override_doctype:
 			override_action = override_doctype.get(context.frm)
 			if override_action:
+				# the hook configs are shared for the whole request, so rewrite a copy: a
+				# bundle's fan-out resolves one action per Handling Unit in a single request
+				override_action = copy.deepcopy(override_action)
 				for action in override_action:
 					action["context"] = target
 					if "." in action.get("target"):
@@ -472,7 +475,8 @@ def get_form_action(barcode_doc: frappe._dict, context: frappe._dict) -> list[di
 						action["target"] = target.get(serialized_target[1])
 				return override_action
 
-	actions = frm.get(barcode_doc.doc.doctype, {}).get(context.frm, [])
+	# the action configs are shared module state, so rewrite a copy
+	actions = copy.deepcopy(frm.get(barcode_doc.doc.doctype, {}).get(context.frm, []))
 	for action in actions:
 		action["context"] = target
 		target_value = action.get("target")
@@ -502,8 +506,7 @@ def get_container_form_actions(bundle: str, context: frappe._dict) -> list[dict[
 	actions = []
 	for leaf in get_bundle_leaves(bundle):
 		leaf_doc = frappe._dict(doc=frappe.get_doc("Handling Unit", leaf), barcode=leaf)
-		# the action configs are shared module state rewritten on every call, so keep a copy
-		actions.extend(copy.deepcopy(get_form_action(leaf_doc, context)))
+		actions.extend(get_form_action(leaf_doc, context))
 	return actions
 
 

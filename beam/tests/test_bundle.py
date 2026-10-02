@@ -739,3 +739,40 @@ def product_bundle(contents: dict) -> str:
 		bundle.append("items", {"item_code": item_code, "qty": qty})
 	bundle.insert()
 	return bundle.name
+
+
+# Deployment hooks
+
+
+@pytest.mark.order(340)
+def test_scanning_a_bundle_resolves_a_beam_frm_override_per_leaf(nest_cap, monkeypatch):
+	bundle_type("Box")
+	leaves = [receive(), receive(OTHER_PIE)]
+	box = pack(leaves)
+	override = {
+		"Handling Unit": {
+			"Stock Reconciliation": [{"action": "add_or_associate", "target": "target.handling_unit"}]
+		}
+	}
+	original = frappe.get_hooks
+
+	def get_hooks(hook=None, *args, **kwargs):
+		if hook == "beam_frm":
+			return override
+		return original(hook, *args, **kwargs)
+
+	monkeypatch.setattr(frappe, "get_hooks", get_hooks)
+	actions = scan_form(box.handling_unit, "Stock Reconciliation")
+	assert sorted(action["target"] for action in actions) == sorted(leaves)
+	assert override["Handling Unit"]["Stock Reconciliation"][0]["target"] == "target.handling_unit"
+
+
+@pytest.mark.order(341)
+def test_identifier_scheme_with_no_provider_installed_raises(nest_cap):
+	bundle_type("Pallet")
+	entry = pack([receive()], type_name="Pallet", submit=False)
+	entry.identifier_scheme_doctype = "Company"
+	entry.identifier_scheme = COMPANY
+	entry.save()
+	with pytest.raises(frappe.ValidationError, match="No application issues identifiers for Company"):
+		entry.submit()

@@ -224,7 +224,8 @@ class HandlingUnitBundleEntry(Document):
 		"""
 		if not self.identifier_scheme or self.container_identifier:
 			return
-		providers = frappe.get_hooks("beam_container_identifier").get(self.identifier_scheme_doctype)
+		# an unregistered hook comes back as an empty list, not a dict
+		providers = frappe.get_hooks("beam_container_identifier", {}).get(self.identifier_scheme_doctype)
 		if not providers:
 			frappe.throw(
 				_(
