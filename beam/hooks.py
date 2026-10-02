@@ -156,31 +156,85 @@ doc_events = {
 		],
 		"validate": [
 			# "beam.beam.handling_unit.validate_handling_unit_overconsumption",
+			"beam.beam.bundle.validate_no_bundle_on_rows",
+			"beam.beam.bundle.validate_member_transactions",
+		],
+		"on_submit": [
+			"beam.beam.bundle.reconcile_contained_members",
+		],
+		"on_cancel": [
+			"beam.beam.bundle.reconcile_contained_members",
 		],
 	},
 	"Purchase Invoice": {
+		"validate": [
+			"beam.beam.bundle.validate_no_bundle_on_rows",
+			"beam.beam.bundle.validate_member_transactions",
+		],
 		"before_submit": [
 			"beam.beam.handling_unit.generate_handling_units",
+		],
+		"on_submit": [
+			"beam.beam.bundle.reconcile_contained_members",
+		],
+		"on_cancel": [
+			"beam.beam.bundle.reconcile_contained_members",
 		],
 	},
 	"Stock Entry": {
 		"validate": [
 			# "beam.beam.handling_unit.validate_handling_unit_overconsumption",
+			"beam.beam.bundle.validate_no_bundle_on_rows",
+			"beam.beam.bundle.validate_member_transactions",
 		],
 		"before_submit": [
 			"beam.beam.inventory_dimension.propagate_inventory_dimensions",
 			"beam.beam.handling_unit.generate_handling_units",
 			"beam.beam.overrides.stock_entry.validate_items_with_handling_unit",
 		],
+		"on_submit": [
+			"beam.beam.bundle.reconcile_contained_members",
+		],
+		"on_cancel": [
+			"beam.beam.bundle.reconcile_contained_members",
+		],
 	},
 	"Sales Invoice": {
 		"validate": [
 			# "beam.beam.handling_unit.validate_handling_unit_overconsumption",
+			"beam.beam.bundle.validate_no_bundle_on_rows",
+			"beam.beam.bundle.validate_member_transactions",
+		],
+		"on_submit": [
+			"beam.beam.bundle.reconcile_contained_members",
+		],
+		"on_cancel": [
+			"beam.beam.bundle.reconcile_contained_members",
 		],
 	},
 	"Delivery Note": {
 		"validate": [
 			# "beam.beam.handling_unit.validate_handling_unit_overconsumption",
+			"beam.beam.bundle.validate_no_bundle_on_rows",
+			"beam.beam.bundle.validate_member_transactions",
+		],
+		"on_submit": [
+			"beam.beam.bundle.reconcile_contained_members",
+		],
+		"on_cancel": [
+			"beam.beam.bundle.reconcile_contained_members",
+		],
+	},
+	"Stock Reconciliation": {
+		"validate": [
+			"beam.beam.bundle.validate_no_bundle_on_rows",
+			"beam.beam.bundle.validate_member_transactions",
+		],
+		"on_submit": [
+			"beam.beam.bundle.reconcile_contained_members",
+		],
+		"on_cancel": [
+			"beam.beam.bundle.reconcile_contained_members",
 		],
 	},
 	"Subcontracting Receipt": {

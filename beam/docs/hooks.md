@@ -4,7 +4,7 @@ For license information, please see license.txt-->
 # Extending BEAM With Custom Hooks
 
 <div class="byline">
-  Tyler Matteson 2026-02-23
+  Claude Opus 5.5, Rohan Bansal, Robert Duncan, Heather Kusmierz, and Tyler Matteson 2026-10-01
 </div>
 
 
@@ -54,4 +54,43 @@ beam_client = {
 	"show_message": "custom_app.show_message"
 }
 
+```
+
+## Nesting hooks
+
+[Nested Handling Units](./handling_unit_nesting.md) publish two hooks, so an application can apply its own nesting rules or issue container identifiers in its own format without changing BEAM.
+
+`beam_nesting_policy` is a list of dotted paths. Each is called after BEAM has checked the bundle type's own rules, with the Handling Unit Bundle Entry, its rows, and the violations found so far, and returns the violation list. It may add to the list, clear it, or replace it.
+
+```python
+# hooks.py
+
+beam_nesting_policy = ["custom_app.nesting.evaluate"]
+```
+
+```python
+# custom_app/nesting.py
+
+def evaluate(entry, rows, violations):
+	if entry.bundle_type == "Pallet" and len(rows) > 40:
+		violations.append("A pallet takes at most 40 cases per packing event")
+	return violations
+```
+
+`beam_container_identifier` maps the doctype of an identifier scheme to the function that issues the next identifier for it. When a submitted Bundle Entry names a scheme of that doctype, BEAM calls the function with the scheme's doctype, its name, and the entry, stores the string it returns as the Container Identifier, and gives the container a barcode for it.
+
+```python
+# hooks.py
+
+beam_container_identifier = {
+	"SSCC Settings": "custom_app.sscc.next_identifier",
+}
+```
+
+```python
+# custom_app/sscc.py
+
+def next_identifier(scheme_doctype, scheme_name, entry):
+	settings = frappe.get_doc(scheme_doctype, scheme_name)
+	return settings.next_serial_shipping_container_code()
 ```

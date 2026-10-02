@@ -4,7 +4,7 @@ For license information, please see license.txt-->
 # BEAM
 
 <div class="byline">
-  Tyler Matteson 2026-02-23
+  Claude Opus 5.5, Rohan Bansal, Robert Duncan, Heather Kusmierz, and Tyler Matteson 2026-10-01
 </div>
 
 BEAM is a general purpose barcode scanning application for ERPNext.
@@ -60,7 +60,7 @@ By default, **Item** and **Warehouse** are enabled. If a Code128 barcode already
 ```
 ## What is a Handling Unit?
 
-A Handling Unit is the combination of a container, any packaging material, and the items within or on it. This could be a pallet of raw materials used in a manufacturing process, a crate containing several other Handling Units, or a delivery vehicle transporting the crates and pallets.
+A Handling Unit is the combination of a container, any packaging material, and the items within or on it. This could be a pallet of raw materials used in a manufacturing process, a crate containing several other Handling Units, or a delivery vehicle transporting the crates and pallets. A container holding other Handling Units is recorded as described in [Nested Handling Units](./handling_unit_nesting.md).
 
 Handling Units have unique, scannable identification numbers that are used in any stock transaction involving the items contained within the unit. The ID allows the user to reference everything about the stock transaction, saved from previous transactions. It also enables you to track the Handling Unit throughout its life cycle. The BEAM application includes a [Handling Unit Traceability report](./hu_traceability_report.md) to summarize the transactions, related documents, quantities, and warehouses that involved a given Handling Unit.
 
