@@ -140,9 +140,13 @@ function scan_dialog(frm) {
 						})
 						return
 					}
+					const rows_before = frm.doc.items.filter(row => row.packed_handling_unit).length
 					window.scanHandler.dispatch(actions)
 					dialog.hide()
-					frappe.show_alert({ message: __('Added row {0}', [frm.doc.items.length]), indicator: 'green' })
+					// a unit already on the entry is reported by the scan handler and adds nothing
+					if (frm.doc.items.length > rows_before) {
+						frappe.show_alert({ message: __('Added row {0}', [frm.doc.items.length]), indicator: 'green' })
+					}
 				})
 		},
 	})
