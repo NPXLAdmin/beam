@@ -15,7 +15,7 @@ from collections import Counter
 import frappe
 from frappe import _
 from frappe.query_builder.functions import Sum
-from frappe.utils import flt, now_datetime
+from frappe.utils import comma_and, comma_or, flt, now_datetime
 
 # A ceiling on every walk, independent of Nest Cap, so that cyclic data or an arrangement
 # grandfathered under a higher cap can never hang a traversal
@@ -342,8 +342,8 @@ def check_loose_handling_units(rows: list, policy) -> list[str]:
 	if policy.allow_loose_handling_units:
 		return []
 	return [
-		_("Row {0}: {1} holds stock, and a {2} does not accept loose Handling Units.").format(
-			row.idx, row.container_handling_unit, policy.name
+		_("{0} does not allow loose Handling Units. Pack {1} into a container first.").format(
+			policy.name, row.container_handling_unit
 		)
 		for row in rows
 		if not row.packed_bundle_type
@@ -355,7 +355,9 @@ def check_allowed_child_types(rows: list, policy) -> list[str]:
 	if not allowed:
 		return []
 	return [
-		_("Row {0}: a {1} cannot go inside a {2}.").format(row.idx, row.packed_bundle_type, policy.name)
+		_("{0} accepts only {1}. Row {2} is a {3}.").format(
+			policy.name, comma_or(sorted(allowed), add_quotes=False), row.idx, row.packed_bundle_type
+		)
 		for row in rows
 		if row.packed_bundle_type and row.packed_bundle_type not in allowed
 	]
@@ -370,8 +372,8 @@ def check_uniform_members(entry, rows: list, policy) -> list[str]:
 	if len(kinds) <= 1:
 		return []
 	return [
-		_("A {0} must hold one kind of thing, and this entry would mix {1}.").format(
-			policy.name, ", ".join(sorted(kinds))
+		_("{0} requires uniform members, but this entry mixes {1}.").format(
+			policy.name, comma_and(sorted(kinds), add_quotes=False)
 		)
 	]
 
@@ -428,6 +430,85 @@ def get_container_identifiers(bundles: list[str]) -> dict[str, str]:
 	return {entry.handling_unit: entry.container_identifier for entry in entries}
 
 
+def get_contents_tree(members: list[str]) -> list[frappe._dict]:
+	"""
+	The whole arrangement beneath these members, nested, for a form that shows a bundle's
+	contents at once. Built from one walk, so it costs one query per level, not per node.
+	"""
+	if not members:
+		return []
+	nodes = walk(members)
+	leaves = [node.handling_unit for node in nodes if node.is_leaf]
+	bundles = [node.handling_unit for node in nodes if not node.is_leaf]
+	details = TreeDetails(
+		get_leaf_balances(leaves), get_bundle_types(bundles), get_container_identifiers(bundles)
+	)
+	built: dict[tuple, frappe._dict] = {}
+	roots = []
+	# a walk lists every parent before its children
+	for node in nodes:
+		branch = details.describe(node)
+		built[(node.root, node.handling_unit)] = branch
+		if node.parent:
+			built[(node.root, node.parent)].children.append(branch)
+		else:
+			roots.append(branch)
+	return roots
+
+
+class TreeDetails:
+	def __init__(self, balances: dict, types: dict, identifiers: dict):
+		self.balances = balances
+		self.types = types
+		self.identifiers = identifiers
+
+	def describe(self, node: frappe._dict) -> frappe._dict:
+		branch = frappe._dict(handling_unit=node.handling_unit, is_leaf=node.is_leaf, children=[])
+		if node.is_leaf:
+			balance = self.balances.get(node.handling_unit) or frappe._dict()
+			branch.update(
+				item_code=balance.item_code, stock_qty=flt(balance.qty), stock_uom=balance.stock_uom
+			)
+		else:
+			branch.update(
+				bundle_type=self.types.get(node.handling_unit),
+				container_identifier=self.identifiers.get(node.handling_unit),
+			)
+		return branch
+
+
+@frappe.whitelist()
+def get_bundle_preview(barcode: str) -> dict | None:
+	"""
+	What scanning a bundle onto a document would add, shown before it is added. Accepts the
+	bundle's Handling Unit or its container identifier, as a scan would.
+	"""
+	frappe.has_permission("Handling Unit Bundle Entry", "read", throw=True)
+	from beam.beam.scan import get_barcode_context
+
+	context = get_barcode_context(barcode)
+	if not context or context.doc.doctype != "Handling Unit" or not is_container([context.doc.name]):
+		return None
+	bundle = context.doc.name
+	balances = get_leaf_balances(get_bundle_leaves(bundle))
+	held = {leaf: balance for leaf, balance in balances.items() if not balance.depleted}
+	return {
+		"bundle": bundle,
+		"bundle_type": get_bundle_types([bundle]).get(bundle),
+		"level": depth_below(bundle),
+		"leaves": [
+			{
+				"handling_unit": leaf,
+				"item_code": balance.item_code,
+				"stock_qty": balance.qty,
+				"stock_uom": balance.stock_uom,
+				"warehouse": balance.warehouse,
+			}
+			for leaf, balance in held.items()
+		],
+	}
+
+
 def get_row_handling_units(doc, fieldnames=("handling_unit", "to_handling_unit")) -> list[str]:
 	return [
 		row.get(field) for row in doc.get("items") or [] for field in fieldnames if row.get(field)
@@ -444,7 +525,7 @@ def validate_no_bundle_on_rows(doc, method: str | None = None) -> None:
 		return
 	messages = [
 		_(
-			"Row {0}: {1} is a bundle. Scan it to add what is inside it, rather than using it on a row."
+			"Row {0}: Handling Unit {1} is a bundle, not a Handling Unit holding stock. Scan the bundle instead and it will expand to one row per item."
 		).format(row.idx, row.get(field))
 		for row in doc.get("items")
 		for field in ("handling_unit", "to_handling_unit")
@@ -468,7 +549,7 @@ def validate_member_transactions(doc, method: str | None = None) -> None:
 	}
 	messages = [
 		_(
-			"Row {0}: {1} is inside {2}, and a {3} does not allow its contents to be used while packed. Unpack it first."
+			"Row {0}: {1} is inside {2}, a {3}, which has Restrict Member Transactions enabled. Unpack it before using it on a stock document."
 		).format(
 			row.idx,
 			row.handling_unit,

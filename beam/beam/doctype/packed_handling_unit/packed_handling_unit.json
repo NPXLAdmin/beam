@@ -8,18 +8,20 @@
 	"field_order": [
 		"packed_doctype",
 		"packed_handling_unit",
-		"container_handling_unit",
 		"packed_bundle_type",
 		"item_code",
 		"stock_qty",
 		"stock_uom",
-		"warehouse"
+		"warehouse",
+		"container_handling_unit"
 	],
 	"fields": [
 		{
+			"columns": 1,
 			"default": "Handling Unit",
 			"fieldname": "packed_doctype",
 			"fieldtype": "Select",
+			"in_list_view": 1,
 			"label": "Packed Doctype",
 			"options": "Handling Unit\nHandling Unit Bundle Entry",
 			"reqd": 1
@@ -35,16 +37,7 @@
 			"reqd": 1
 		},
 		{
-			"description": "The Handling Unit of whatever was packed. Every containment query joins on this field.",
-			"fieldname": "container_handling_unit",
-			"fieldtype": "Link",
-			"label": "Bundle Handling Unit",
-			"options": "Handling Unit",
-			"read_only": 1,
-			"search_index": 1
-		},
-		{
-			"columns": 2,
+			"columns": 1,
 			"description": "Blank where what was packed holds stock.",
 			"fieldname": "packed_bundle_type",
 			"fieldtype": "Link",
@@ -88,12 +81,21 @@
 			"label": "Warehouse",
 			"options": "Warehouse",
 			"read_only": 1
+		},
+		{
+			"description": "The Handling Unit of whatever was packed. Every containment query joins on this field.",
+			"fieldname": "container_handling_unit",
+			"fieldtype": "Link",
+			"label": "Bundle Handling Unit",
+			"options": "Handling Unit",
+			"read_only": 1,
+			"search_index": 1
 		}
 	],
 	"index_web_pages_for_search": 1,
 	"istable": 1,
 	"links": [],
-	"modified": "2026-10-01 12:00:00.000000",
+	"modified": "2026-10-01 18:00:00.000000",
 	"modified_by": "Administrator",
 	"module": "BEAM",
 	"name": "Packed Handling Unit",

@@ -16,9 +16,13 @@ from beam.beam.bundle import (
 	get_bundle_contents,
 	get_bundle_entry_of,
 	get_bundle_leaves,
+	get_bundle_preview,
 	get_bundle_tree,
 	get_container_of,
 	is_container,
+)
+from beam.beam.doctype.handling_unit_bundle_entry.handling_unit_bundle_entry import (
+	get_entry_preview,
 )
 from beam.beam.scan import clear_inv_dim_cache, get_barcode_context, get_handling_unit
 
@@ -292,7 +296,10 @@ def test_lowering_nest_cap_below_existing_bundles_needs_acknowledging(nest_cap):
 def test_loose_handling_units_can_be_refused(nest_cap):
 	bundle_type("Box")
 	bundle_type("Pallet", allow_loose_handling_units=0)
-	with pytest.raises(frappe.ValidationError, match="does not accept loose Handling Units"):
+	with pytest.raises(
+		frappe.ValidationError,
+		match="Pallet does not allow loose Handling Units. Pack .* into a container first.",
+	):
 		pack([receive()], type_name="Pallet")
 	box = pack([receive()])
 	assert pack([box.handling_unit], type_name="Pallet").docstatus == 1
@@ -304,7 +311,7 @@ def test_allowed_child_types(nest_cap):
 	bundle_type("Case")
 	bundle_type("Pallet", allowed_child_types=["Case"])
 	box = pack([receive()])
-	with pytest.raises(frappe.ValidationError, match="a Box cannot go inside a Pallet"):
+	with pytest.raises(frappe.ValidationError, match="Pallet accepts only Case. Row 1 is a Box."):
 		pack([box.handling_unit], type_name="Pallet")
 
 
@@ -316,7 +323,7 @@ def test_max_members_and_uniform_members_are_reported_together(nest_cap):
 	with pytest.raises(frappe.ValidationError) as error:
 		pack([box.handling_unit, receive()], type_name="Pallet")
 	assert "holds at most 1" in str(error.value)
-	assert "must hold one kind of thing" in str(error.value)
+	assert "Pallet requires uniform members, but this entry mixes" in str(error.value)
 
 
 @pytest.mark.order(315)
@@ -357,14 +364,16 @@ def refuse_everything(entry, rows, violations):
 @pytest.mark.order(317)
 def test_contents_must_share_a_warehouse(nest_cap):
 	bundle_type("Box")
-	with pytest.raises(frappe.ValidationError, match="must be in one warehouse"):
+	with pytest.raises(frappe.ValidationError, match="A bundle cannot straddle warehouses."):
 		pack([receive(), receive(warehouse=KITCHEN)])
 
 
 @pytest.mark.order(318)
 def test_a_handling_unit_holding_stock_cannot_be_a_bundle(nest_cap):
 	bundle_type("Box")
-	with pytest.raises(frappe.ValidationError, match="holds stock of its own"):
+	with pytest.raises(
+		frappe.ValidationError, match="holds stock of its own, so it cannot be used as a bundle"
+	):
 		pack([receive()], handling_unit=receive())
 
 
@@ -383,7 +392,10 @@ def test_a_bundle_cannot_go_inside_itself(nest_cap):
 	bundle_type("Pallet")
 	box = pack([receive()])
 	pallet = pack([box.handling_unit], type_name="Pallet")
-	with pytest.raises(frappe.ValidationError, match="contains this bundle"):
+	with pytest.raises(
+		frappe.ValidationError,
+		match="already contains this bundle, so packing it here would create a loop",
+	):
 		pack([pallet.handling_unit], handling_unit=box.handling_unit)
 
 
@@ -402,7 +414,9 @@ def test_duplicate_rows_are_refused(nest_cap):
 def test_a_bundle_never_appears_on_a_transaction_row(nest_cap):
 	bundle_type("Box")
 	box = pack([receive()])
-	with pytest.raises(frappe.ValidationError, match="is a bundle"):
+	with pytest.raises(
+		frappe.ValidationError, match="is a bundle, not a Handling Unit holding stock"
+	):
 		stock_entry(
 			"Material Issue",
 			[{"item_code": PIE, "qty": 1, "s_warehouse": BAKED_GOODS, "handling_unit": box.handling_unit}],
@@ -414,7 +428,9 @@ def test_restricted_bundle_refuses_member_transactions(nest_cap):
 	bundle_type("Crate", restrict_member_transactions=1)
 	leaf = receive()
 	pack([leaf], type_name="Crate")
-	with pytest.raises(frappe.ValidationError, match="does not allow its contents to be used"):
+	with pytest.raises(
+		frappe.ValidationError, match="which has Restrict Member Transactions enabled"
+	):
 		stock_entry(
 			"Material Issue",
 			[{"item_code": PIE, "qty": 1, "s_warehouse": BAKED_GOODS, "handling_unit": leaf}],
@@ -601,10 +617,66 @@ def test_scanning_onto_a_bundle_entry_adds_a_packed_row(nest_cap):
 	assert box_action["context"]["stock_qty"] == 10
 
 
+@pytest.mark.order(334)
+def test_scan_bundle_previews_what_a_scan_would_add(nest_cap):
+	bundle_type("Box")
+	leaves = [receive(), receive()]
+	box = pack(leaves)
+	preview = get_bundle_preview(box.handling_unit)
+	assert preview["bundle"] == box.handling_unit
+	assert preview["bundle_type"] == "Box"
+	assert preview["level"] == 2
+	assert sorted(leaf["handling_unit"] for leaf in preview["leaves"]) == sorted(leaves)
+	assert get_bundle_preview(leaves[0]) is None
+	assert get_bundle_preview("not-a-barcode") is None
+
+
+@pytest.mark.order(335)
+def test_boot_tells_the_client_where_nesting_is_on(nest_cap):
+	from beam.beam.boot import get_beam_settings
+
+	assert get_beam_settings()[COMPANY]["nest_cap"] == 3
+
+
+# Bundle Contents
+
+
+@pytest.mark.order(336)
+def test_bundle_contents_shows_the_whole_arrangement(nest_cap):
+	bundle_type("Box")
+	bundle_type("Pallet")
+	leaves = [receive(), receive(), receive(OTHER_PIE)]
+	box_a = pack(leaves[:2])
+	box_b = pack(leaves[2:])
+	pallet = pack([box_a.handling_unit, box_b.handling_unit], type_name="Pallet")
+	preview = get_entry_preview(pallet.as_dict())
+	assert preview["level"] == 3
+	assert preview["leaf_count"] == 3
+	assert preview["total_qty"] == 30
+	assert preview["warehouses"] == [BAKED_GOODS]
+	tree = preview["tree"]
+	assert [node.handling_unit for node in tree] == [box_a.handling_unit, box_b.handling_unit]
+	assert tree[0].bundle_type == "Box"
+	assert sorted(child.handling_unit for child in tree[0].children) == sorted(leaves[:2])
+	assert tree[1].children[0].item_code == OTHER_PIE
+	assert tree[1].children[0].stock_qty == 10
+
+
+@pytest.mark.order(337)
+def test_bundle_contents_of_a_draft_include_its_rows(nest_cap):
+	bundle_type("Box")
+	leaves = [receive(), receive()]
+	draft = pack(leaves, submit=False)
+	preview = get_entry_preview(draft.as_dict())
+	assert preview["level"] == 2
+	assert sorted(node.handling_unit for node in preview["tree"]) == sorted(leaves)
+	assert all(node.is_leaf for node in preview["tree"])
+
+
 # Container identifiers and kits
 
 
-@pytest.mark.order(334)
+@pytest.mark.order(338)
 def test_container_identifier_is_issued_on_submit_and_scans(nest_cap, monkeypatch):
 	bundle_type("Pallet")
 	original = frappe.get_hooks
@@ -623,13 +695,14 @@ def test_container_identifier_is_issued_on_submit_and_scans(nest_cap, monkeypatc
 	entry.submit()
 	assert entry.container_identifier == f"SSCC-{entry.name}"
 	assert get_barcode_context(entry.container_identifier).doc.name == entry.handling_unit
+	assert get_bundle_preview(entry.container_identifier)["bundle"] == entry.handling_unit
 
 
 def issue_identifier(scheme_doctype, scheme_name, entry):
 	return f"SSCC-{entry.name}"
 
 
-@pytest.mark.order(335)
+@pytest.mark.order(339)
 def test_kit_completeness_counts_items_at_any_depth(nest_cap):
 	bundle_type("Box")
 	bundle_type("Pallet")

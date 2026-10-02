@@ -6,7 +6,7 @@ from collections import defaultdict
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt
+from frappe.utils import comma_and, flt
 
 from beam.beam.bundle import (
 	depth_below,
@@ -14,6 +14,7 @@ from beam.beam.bundle import (
 	get_ancestors,
 	get_bundle_contents,
 	get_containers_of,
+	get_contents_tree,
 	get_leaf_balances,
 	get_nest_cap,
 	get_packed_rows_details,
@@ -112,9 +113,9 @@ class HandlingUnitBundleEntry(Document):
 		for row in self.items:
 			if row.container_handling_unit in forbidden:
 				frappe.throw(
-					_("Row {0}: {1} contains this bundle, so it cannot also go inside it.").format(
-						row.idx, row.container_handling_unit
-					),
+					_(
+						"Row {0}: {1} already contains this bundle, so packing it here would create a loop."
+					).format(row.idx, row.container_handling_unit),
 					title=_("Bundle Inside Itself"),
 				)
 
@@ -130,7 +131,7 @@ class HandlingUnitBundleEntry(Document):
 		if depth > nest_cap:
 			frappe.throw(
 				_(
-					"This would nest the arrangement {0} levels deep, and Nest Cap for {1} is {2}. Raise Nest Cap in BEAM Settings, or pack into a shallower bundle."
+					"This would make the arrangement {0} levels deep, but Nest Cap for {1} is {2}. Depth is measured across the whole arrangement, not this bundle alone."
 				).format(depth, self.company, nest_cap),
 				title=_("Nest Cap Exceeded"),
 			)
@@ -163,8 +164,8 @@ class HandlingUnitBundleEntry(Document):
 		self.warehouse = next(iter(warehouses)) if len(warehouses) == 1 else None
 		if self.purpose == "Pack" and len(warehouses) > 1:
 			frappe.throw(
-				_("Everything in a bundle must be in one warehouse, and this entry would mix {0}.").format(
-					", ".join(sorted(warehouses))
+				_("A bundle cannot straddle warehouses. This entry mixes {0}.").format(
+					comma_and(sorted(warehouses), add_quotes=False)
 				),
 				title=_("Contents in More Than One Warehouse"),
 			)
@@ -178,7 +179,7 @@ class HandlingUnitBundleEntry(Document):
 		):
 			frappe.throw(
 				_(
-					"{0} holds stock of its own, so it cannot be a bundle. Leave Handling Unit empty to create a new one for the container."
+					"Handling Unit {0} holds stock of its own, so it cannot be used as a bundle. A Handling Unit either holds stock or holds other Handling Units."
 				).format(self.handling_unit),
 				title=_("Bundle Holds Stock"),
 			)
@@ -210,7 +211,7 @@ class HandlingUnitBundleEntry(Document):
 		for row in self.items:
 			if row.container_handling_unit in containers:
 				frappe.throw(
-					_("Row {0}: {1} is already inside {2}. Unpack it from {2} first.").format(
+					_("Row {0}: {1} is already inside {2}. Unpack it first.").format(
 						row.idx, row.container_handling_unit, containers[row.container_handling_unit]
 					),
 					title=_("Already Packed"),
@@ -266,35 +267,41 @@ class HandlingUnitBundleEntry(Document):
 		return get_bundle_contents(self.handling_unit, exclude)
 
 	def get_projected_leaf_balances(self) -> list:
-		members = self.get_projected_members()
-		if not members:
-			return []
-		leaves = [node.handling_unit for node in walk(members) if node.is_leaf]
-		balances = get_leaf_balances(leaves)
-		return [balances[leaf] for leaf in leaves if leaf in balances and not balances[leaf].depleted]
+		return get_held_balances(self.get_projected_members())
+
+	def get_displayed_members(self) -> list[str]:
+		"""A draft shows what it will hold once submitted; anything else shows what it holds now"""
+		return self.get_projected_members() if self.docstatus == 0 else self.get_current_members()
+
+
+def get_held_balances(members: list[str]) -> list:
+	"""Balances of the Handling Units holding stock anywhere beneath these members"""
+	if not members:
+		return []
+	leaves = [node.handling_unit for node in walk(members) if node.is_leaf]
+	balances = get_leaf_balances(leaves)
+	return [balances[leaf] for leaf in leaves if leaf in balances and not balances[leaf].depleted]
 
 
 @frappe.whitelist()
 def get_entry_preview(doc: str | dict) -> dict:
 	"""
-	Level, contents and kit state of an unsaved entry as it would be once submitted, so the form
-	can show them while rows are still being scanned
+	The Bundle Contents display: level, totals and the whole arrangement as a tree. A draft is
+	shown as it will be once submitted, so the form keeps up while rows are still being scanned.
 	"""
 	frappe.has_permission("Handling Unit Bundle Entry", "read", throw=True)
 	entry = frappe.get_doc(frappe.parse_json(doc))
 	for row in entry.items:
 		row.container_handling_unit = entry.get_row_handling_unit(row)
-	balances = entry.get_projected_leaf_balances()
-	entry.set_kit_complete()
-	contents: defaultdict[tuple, float] = defaultdict(float)
-	for balance in balances:
-		contents[(balance.item_code, balance.stock_uom)] += flt(balance.qty)
+	members = entry.get_displayed_members()
+	balances = get_held_balances(members)
+	if entry.docstatus == 0:
+		entry.set_kit_complete()
 	return {
 		"level": entry.level,
 		"kit_complete": entry.kit_complete,
 		"warehouses": sorted({balance.warehouse for balance in balances}),
-		"contents": [
-			{"item_code": item_code, "stock_uom": stock_uom, "qty": qty}
-			for (item_code, stock_uom), qty in sorted(contents.items())
-		],
+		"leaf_count": len(balances),
+		"total_qty": sum(flt(balance.qty) for balance in balances),
+		"tree": get_contents_tree(members),
 	}

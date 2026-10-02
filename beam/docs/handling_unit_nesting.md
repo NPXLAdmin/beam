@@ -90,6 +90,12 @@ filling it.
 
 Then scan everything going into it. Each scan adds a row showing the item,
 quantity, unit of measure, and warehouse so you can confirm what you picked up.
+Without a scanner attached, **Scan Handling Unit** in the toolbar does the same
+from a typed or pasted code.
+
+The **Bundle Contents** section shows the whole arrangement as you build it: its
+level, how many Handling Units holding stock it contains, the total quantity, the
+warehouse, and a tree of every box and item inside.
 
 A row can be either a Handling Unit or another Bundle Entry, which is how boxes
 go onto pallets — you scan the box, and the box brings its contents with it.
@@ -156,6 +162,10 @@ Scanning pallet 999 on a Delivery Note produces:
 Depth does not matter. Scanning a trailer that holds pallets of boxes of eaches
 produces a row for every each, because the rows that reach the document are
 always the stock-bearing leaves.
+
+On a Stock Entry, **Scan Bundle** under **Handling Units** does the same from the
+toolbar, and lists what will be added before you add it. The button appears once
+Nest Cap for the company is above 1.
 
 In a list view, scanning a container filters to every document that references
 anything inside it.
