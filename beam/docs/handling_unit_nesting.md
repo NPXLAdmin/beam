@@ -71,7 +71,7 @@ and a type with nothing configured accepts anything.
 | **Require Uniform Members** | When set, everything inside must be the same kind — all leaves, or all one type. Prevents a half-packed pallet of mixed cases and loose units. |
 | **Max Members** | A count limit. Leave at zero for unlimited. |
 | **Seal When Contained** | When set, a container of this type cannot be packed or unpacked while it is itself inside something else. It has to come off the pallet first. |
-| **Restrict Member Transactions** | When set, the contents cannot be used on a stock transaction while they are inside. See [Reaching into a container](#reaching-into-a-container). |
+| **Restrict Member Transactions** | When set, nothing inside — at any depth — can be used on a stock transaction while it is inside, unless the whole container goes on the transaction. See [Reaching into a container](#reaching-into-a-container). |
 
 So "a pallet takes cases or boxes, but never loose units" is a Pallet with
 **Allowed Child Types** of Case and Box and **Allow Loose Handling Units**
@@ -198,7 +198,14 @@ having to remember to update them, and the history explains why the unit left.
 
 If you need this prevented, turn on **Restrict Member Transactions** on the
 container's type. The transaction is then refused until the unit is explicitly
-unpacked.
+unpacked. The restriction covers everything beneath the container, however deep:
+on a restricted pallet, the units inside its boxes are protected too.
+
+Moving the container as a whole is not reaching in, so it is still allowed. A
+transaction that takes every Handling Unit beneath the restricted container,
+each at its full quantity — scanning the pallet onto a Delivery Note, say — goes
+through. Lowering the quantity on one of those rows makes it a partial take,
+and it is refused.
 
 ## Nest Cap
 

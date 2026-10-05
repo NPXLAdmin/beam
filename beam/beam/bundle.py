@@ -122,15 +122,36 @@ def root_of(handling_unit: str) -> str:
 
 
 def get_ancestors(handling_unit: str, exclude_entry: str | None = None) -> list[str]:
-	"""Every bundle above this unit, innermost first. Stops on a repeat so cyclic data ends."""
-	ancestors: list[str] = []
-	current: str | None = handling_unit
+	"""Every bundle above this unit, innermost first"""
+	return get_ancestry([handling_unit], exclude_entry).get(handling_unit, [])
+
+
+def get_ancestry(
+	handling_units: list[str], exclude_entry: str | None = None
+) -> dict[str, list[str]]:
+	"""
+	Every bundle above each unit, innermost first, climbing one level for all of them per query.
+	A unit's climb stops on a repeat so cyclic data ends.
+	"""
+	ancestry: dict[str, list[str]] = {hu: [] for hu in handling_units if hu}
+	# each unit mapped to the highest bundle its climb has reached
+	climbing = {hu: hu for hu in ancestry}
 	for _step in range(WALK_LIMIT):
-		current = get_containers_of([current], exclude_entry).get(current) if current else None
-		if not current or current in ancestors or current == handling_unit:
+		containers = get_containers_of(list(set(climbing.values())), exclude_entry)
+		climbing = {
+			hu: containers[top]
+			for hu, top in climbing.items()
+			if is_new_ancestor(hu, containers.get(top), ancestry[hu])
+		}
+		if not climbing:
 			break
-		ancestors.append(current)
-	return ancestors
+		for hu, container in climbing.items():
+			ancestry[hu].append(container)
+	return ancestry
+
+
+def is_new_ancestor(handling_unit: str, container: str | None, ancestors: list[str]) -> bool:
+	return bool(container) and container != handling_unit and container not in ancestors
 
 
 def get_container_of(handling_unit: str) -> str | None:
@@ -535,32 +556,91 @@ def validate_no_bundle_on_rows(doc, method: str | None = None) -> None:
 
 
 def validate_member_transactions(doc, method: str | None = None) -> None:
-	"""Reject rows whose Handling Unit is inside a bundle whose type restricts its contents"""
-	containers = get_containers_of(get_row_handling_units(doc, ("handling_unit",)))
-	if not containers:
+	"""
+	Reject rows whose Handling Unit is inside a bundle, at any level, whose type restricts its
+	contents: a restricting Pallet covers the units in its Boxes as well as any loose on it.
+	Moving a bundle whole is not reaching into it, so a bundle this document takes entirely
+	releases its own restriction, though not one held by a bundle further up.
+	"""
+	rows = [row for row in doc.get("items") or [] if row.get("handling_unit")]
+	ancestry = get_ancestry([row.handling_unit for row in rows])
+	restricting = get_restricting_types(ancestry)
+	if not restricting:
 		return
-	types = get_bundle_types(list(set(containers.values())))
-	restricted = {
-		bundle
+	enforced = set(restricting) - get_bundles_taken_whole(doc, list(restricting))
+	messages = [
+		_(
+			"Row {0}: {1} is inside {2}, a {3}, which has Restrict Member Transactions enabled. Unpack it first, or include everything in {2} at its full quantity."
+		).format(row.idx, row.handling_unit, bundle, restricting[bundle])
+		for row, bundle in get_restricted_rows(rows, ancestry, enforced)
+	]
+	if messages:
+		frappe.throw("<br>".join(messages), title=_("Handling Unit Is Packed"))
+
+
+def get_restricting_types(ancestry: dict[str, list[str]]) -> dict[str, str]:
+	"""The bundles above these units whose type restricts their contents, with that type"""
+	types = get_bundle_types([bundle for ancestors in ancestry.values() for bundle in ancestors])
+	return {
+		bundle: bundle_type
 		for bundle, bundle_type in types.items()
 		if frappe.get_cached_value(
 			"Handling Unit Bundle Type", bundle_type, "restrict_member_transactions"
 		)
 	}
-	messages = [
-		_(
-			"Row {0}: {1} is inside {2}, a {3}, which has Restrict Member Transactions enabled. Unpack it before using it on a stock document."
-		).format(
-			row.idx,
-			row.handling_unit,
-			containers[row.handling_unit],
-			types.get(containers[row.handling_unit]),
-		)
-		for row in doc.get("items")
-		if containers.get(row.get("handling_unit")) in restricted
-	]
-	if messages:
-		frappe.throw("<br>".join(messages), title=_("Handling Unit Is Packed"))
+
+
+def get_bundles_taken_whole(doc, bundles: list[str]) -> set[str]:
+	"""The bundles this document takes entirely: every unit beneath them holding stock, in full"""
+	leaves: dict[str, list[str]] = {bundle: [] for bundle in bundles}
+	for node in walk(bundles):
+		if node.is_leaf:
+			leaves[node.root].append(node.handling_unit)
+	balances = get_leaf_balances([leaf for group in leaves.values() for leaf in group])
+	taken = get_quantities_taken(doc)
+	return {
+		bundle
+		for bundle, group in leaves.items()
+		if all(is_taken_in_full(balances.get(leaf), taken.get(leaf)) for leaf in group)
+	}
+
+
+def get_quantities_taken(doc) -> dict[str, float]:
+	"""Stock each Handling Unit gives up on this document, in its stock UOM"""
+	qty_field = "transfer_qty" if doc.doctype == "Stock Entry" else "stock_qty"
+	taken: dict[str, float] = {}
+	for row in doc.get("items") or []:
+		if row.get("handling_unit") and takes_stock(doc, row):
+			taken[row.handling_unit] = taken.get(row.handling_unit, 0.0) + abs(flt(row.get(qty_field)))
+	return taken
+
+
+def takes_stock(doc, row) -> bool:
+	"""Whether this row takes stock out of its Handling Unit. A Stock Reconciliation counts it."""
+	if doc.doctype == "Stock Entry":
+		return bool(row.get("s_warehouse"))
+	if doc.doctype in ("Sales Invoice", "Purchase Invoice") and not doc.get("update_stock"):
+		return False
+	if doc.doctype in ("Delivery Note", "Sales Invoice"):
+		return not doc.get("is_return")
+	return doc.doctype in ("Purchase Receipt", "Purchase Invoice") and bool(doc.get("is_return"))
+
+
+def is_taken_in_full(balance: frappe._dict | None, taken: float | None) -> bool:
+	if not balance or balance.depleted:
+		return True
+	precision = frappe.get_precision("Stock Ledger Entry", "actual_qty")
+	return flt(taken, precision) >= flt(balance.qty, precision)
+
+
+def get_restricted_rows(rows: list, ancestry: dict, enforced: set[str]) -> list[tuple]:
+	"""Each row a restriction holds, with the nearest bundle above it enforcing one"""
+	restricted = []
+	for row in rows:
+		bundle = next((bundle for bundle in ancestry[row.handling_unit] if bundle in enforced), None)
+		if bundle:
+			restricted.append((row, bundle))
+	return restricted
 
 
 def reconcile_contained_members(doc, method: str | None = None) -> None:

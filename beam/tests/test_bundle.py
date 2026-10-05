@@ -437,6 +437,67 @@ def test_restricted_bundle_refuses_member_transactions(nest_cap):
 		)
 
 
+@pytest.mark.order(342)
+def test_restriction_covers_everything_beneath_the_bundle(nest_cap):
+	bundle_type("Box")
+	bundle_type("Crate", restrict_member_transactions=1)
+	leaf = receive()
+	box = pack([leaf])
+	crate = pack([box.handling_unit], type_name="Crate")
+	with pytest.raises(frappe.ValidationError, match=f"is inside {crate.handling_unit}, a Crate"):
+		stock_entry(
+			"Material Issue",
+			[{"item_code": PIE, "qty": 1, "s_warehouse": BAKED_GOODS, "handling_unit": leaf}],
+		)
+
+
+def transfer_to_kitchen(quantities):
+	return stock_entry(
+		"Material Transfer",
+		[
+			{
+				"item_code": PIE,
+				"qty": qty,
+				"s_warehouse": BAKED_GOODS,
+				"t_warehouse": KITCHEN,
+				"handling_unit": leaf,
+			}
+			for leaf, qty in quantities.items()
+		],
+	)
+
+
+@pytest.mark.order(343)
+def test_a_restricted_bundle_moves_whole(nest_cap, carry_forward):
+	bundle_type("Box")
+	bundle_type("Crate", restrict_member_transactions=1)
+	leaves = [receive(), receive()]
+	crate = pack([pack(leaves[:1]).handling_unit, leaves[1]], type_name="Crate")
+	transfer_to_kitchen({leaf: 10 for leaf in leaves})
+	assert sorted(get_bundle_leaves(crate.handling_unit)) == sorted(leaves)
+
+
+@pytest.mark.order(344)
+def test_taking_part_of_a_restricted_bundle_is_refused(nest_cap, carry_forward):
+	bundle_type("Crate", restrict_member_transactions=1)
+	leaves = [receive(), receive()]
+	crate = pack(leaves, type_name="Crate")
+	with pytest.raises(
+		frappe.ValidationError, match=f"include everything in {crate.handling_unit} at its full quantity"
+	):
+		transfer_to_kitchen({leaves[0]: 10, leaves[1]: 4})
+
+
+@pytest.mark.order(345)
+def test_taking_a_restricted_bundle_whole_leaves_the_restriction_above_it(nest_cap):
+	bundle_type("Crate", restrict_member_transactions=1)
+	taken, other = receive(), receive()
+	inner = pack([taken], type_name="Crate")
+	outer = pack([inner.handling_unit, other], type_name="Crate")
+	with pytest.raises(frappe.ValidationError, match=f"is inside {outer.handling_unit}, a Crate"):
+		issue_in_full(taken)
+
+
 def issue_in_full(handling_unit):
 	return stock_entry(
 		"Material Issue",
