@@ -2,6 +2,8 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe import _
+from frappe.utils import cint
 
 from beam.beam.scan.config import get_scan_doctypes
 
@@ -66,12 +68,22 @@ def get_carry_forward_dims() -> list[dict]:
 	the scan cache when an Inventory Dimension is updated or deleted."""
 
 	def _fetch():
+		fields = ["source_fieldname"]
+		# custom_carry_forward_manufacture is synced with BEAM's customizations, after patches,
+		# so the column can be missing mid-migrate. Select it only when present and default it
+		# off, so submit-time carry-forward never depends on sync ordering.
+		has_manufacture = frappe.db.has_column("Inventory Dimension", "custom_carry_forward_manufacture")
+		if has_manufacture:
+			fields.append("custom_carry_forward_manufacture")
+
 		return [
-			d
+			frappe._dict(
+				{**d, "custom_carry_forward_manufacture": d.get("custom_carry_forward_manufacture", 0)}
+			)
 			for d in frappe.get_all(
 				"Inventory Dimension",
 				filters={"custom_carry_forward": 1},
-				fields=["source_fieldname"],
+				fields=fields,
 			)
 			if d.source_fieldname
 		]
@@ -103,3 +115,49 @@ def propagate_inventory_dimensions(doc, method=None):
 			target = f"to_{dim.source_fieldname}"
 			if row.get(dim.source_fieldname) and not row.get(target):
 				row.set(target, row.get(dim.source_fieldname))
+
+
+def propagate_manufacture_dimensions(doc, method=None):
+	"""before_submit hook for Manufacture Stock Entries: carry a consumed raw material's dimension
+	value forward onto the finished-good and scrap rows' source field.
+
+	Only fires for dimensions flagged with `custom_carry_forward_manufacture` (a customer's
+	shipping unit, say, but not Handling Unit: a finished good gets a brand-new Handling Unit),
+	and only when consumption is not itemized (``Manufacturing Settings.material_consumption``
+	off), where the entry has a single material receipt.
+
+	The raw material's value reaches the finished good's Stock Ledger Entry through the source
+	field: the finished-good row has only a target warehouse, so `propagate_inventory_dimensions`
+	skips it and the stock controller posts the plain source field to the SLE."""
+	if doc.doctype != "Stock Entry" or doc.purpose != "Manufacture":
+		return
+
+	if cint(frappe.db.get_single_value("Manufacturing Settings", "material_consumption")):
+		return
+
+	dims = [d for d in get_carry_forward_dims() if d.get("custom_carry_forward_manufacture")]
+	for dim in dims:
+		carry_raw_material_value_forward(doc, dim.source_fieldname)
+
+
+def carry_raw_material_value_forward(doc, fieldname: str) -> None:
+	"""Set the consumed raw materials' single value on every finished-good and scrap row that has none"""
+	values = {
+		row.get(fieldname)
+		for row in doc.items or []
+		if row.item_code and not row.is_finished_item and not row.is_scrap_item and row.get(fieldname)
+	}
+	if not values:
+		return
+	if len(values) > 1:
+		label = frappe.get_meta("Stock Entry Detail").get_label(fieldname)
+		frappe.throw(
+			_(
+				"Cannot carry {0} forward to the finished good: raw materials have differing "
+				"values ({1}). Set {0} on the finished good manually."
+			).format(label, ", ".join(sorted(values)))
+		)
+	value = values.pop()
+	for row in doc.items or []:
+		if row.item_code and (row.is_finished_item or row.is_scrap_item) and not row.get(fieldname):
+			row.set(fieldname, value)

@@ -188,6 +188,7 @@ doc_events = {
 			"beam.beam.bundle.validate_member_transactions",
 		],
 		"before_submit": [
+			"beam.beam.inventory_dimension.propagate_manufacture_dimensions",
 			"beam.beam.inventory_dimension.propagate_inventory_dimensions",
 			"beam.beam.handling_unit.generate_handling_units",
 			"beam.beam.overrides.stock_entry.validate_items_with_handling_unit",
