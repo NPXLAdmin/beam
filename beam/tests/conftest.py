@@ -17,6 +17,7 @@
 # 166–168 | Printer setup — wizard API permissions
 # 170–200 | Print queue panel — job snapshots, client polling, permissions
 # 210–220 | Live CUPS — ZD621 at Chelsea dock (workflow CUPS service container)
+# 300–345 | Nested Handling Units — bundle types, packing, nesting rules, scanning, reconciliation
 #
 # Manual testing helpers
 # ----------------------

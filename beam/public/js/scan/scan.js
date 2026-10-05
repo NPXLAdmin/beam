@@ -60,7 +60,8 @@ class ScanHandler {
 	reduceContext() {
 		if (!frappe.boot.beam_doctypes) {
 			frappe.xcall('beam.beam.scan.config.get_scan_doctypes').then(r => {
-				frappe.boot.beam = r
+				// merge, so the per-company settings and print format from boot survive a scan
+				frappe.boot.beam = { ...frappe.boot.beam, ...r }
 			})
 		}
 		const route = frappe.get_route()
@@ -97,24 +98,27 @@ class ScanHandler {
 				const context = this.reduceContext()
 				frappe.xcall('beam.beam.scan.scan', { barcode: sCode, context: context, current_qty: iQty }).then(r => {
 					if (r && r.length) {
-						if (Object.keys(frappe.boot.beam.client).includes(r[0].action)) {
-							let path = frappe.boot.beam.client[r[0].action][0]
-							resolve(path.split('.').reduce((o, i) => o[i], window)(r)) // calls (first) custom built callback registered in hooks
-						} else {
-							resolve(this[String(r[0].action)](r)) // TODO: this only calls the first function
-						}
+						resolve(this.dispatch(r))
 					}
 					// TODO: else error
 				})
 			}
 		})
 	}
+	// Applies the actions a scan returned. Also used by dialogs that stand in for a scanner.
+	dispatch(actions) {
+		if (Object.keys(frappe.boot.beam.client).includes(actions[0].action)) {
+			let path = frappe.boot.beam.client[actions[0].action][0]
+			return path.split('.').reduce((o, i) => o[i], window)(actions) // calls (first) custom built callback registered in hooks
+		}
+		return this[String(actions[0].action)](actions) // TODO: this only calls the first function
+	}
 	route(barcode_context) {
 		frappe.set_route('Form', barcode_context[0].field, barcode_context[0].target)
 	}
 	filter(barcode_context) {
 		const filters_to_apply = barcode_context.map(filterset => {
-			window.fltr.add_filter(filterset.doctype, filterset.field, '=', filterset.target)
+			window.fltr.add_filter(filterset.doctype, filterset.field, filterset.operator || '=', filterset.target)
 		})
 		Promise.all(filters_to_apply).then(() => {
 			window.fltr.apply()
@@ -137,10 +141,16 @@ class ScanHandler {
 							'Manufacture',
 						].includes(cur_frm.doc.stock_entry_type)
 					) {
-						return row.item_code == field.context.item_code || row.handling_unit
+						// match this action's own Handling Unit, so a scanned bundle's contents each get a row
+						return (
+							(row.item_code == field.context.item_code && !row.handling_unit) ||
+							row.handling_unit == field.context.handling_unit
+						)
 					}
 					return (
-						(row.item_code == field.context.item_code && row.stock_qty == field.context.stock_qty) ||
+						(row.item_code == field.context.item_code &&
+							row.stock_qty == field.context.stock_qty &&
+							!row.handling_unit) ||
 						row.handling_unit == field.context.handling_unit
 					)
 				})
@@ -170,7 +180,9 @@ class ScanHandler {
 						continue
 					}
 					if (
-						(row.item_code == field.context.item_code && row.stock_qty == field.context.stock_qty) ||
+						(row.item_code == field.context.item_code &&
+							row.stock_qty == field.context.stock_qty &&
+							!row.handling_unit) ||
 						row.handling_unit == field.context.handling_unit
 					) {
 						if (cur_frm.doc.doctype == 'Stock Entry') {
@@ -289,5 +301,19 @@ class ScanHandler {
 		barcode_context.forEach(action => {
 			cur_frm.set_value(action.field, action.target)
 		})
+	}
+	add_packed_handling_unit(barcode_context) {
+		barcode_context.forEach(action => {
+			if (cur_frm.doc.items.some(row => row.container_handling_unit == action.context.container_handling_unit)) {
+				frappe.show_alert({ message: __('{0} is already on this entry', [action.target]), indicator: 'orange' })
+				return
+			}
+			if (!cur_frm.doc.items.length || !cur_frm.doc.items[0].packed_handling_unit) {
+				cur_frm.doc.items = []
+			}
+			cur_frm.add_child('items', action.context)
+		})
+		cur_frm.refresh_field('items')
+		cur_frm.trigger('items_changed')
 	}
 }

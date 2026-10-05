@@ -6,6 +6,8 @@
 	"engine": "InnoDB",
 	"field_order": [
 		"enable_handling_units",
+		"nest_cap",
+		"acknowledge_deeper_bundles",
 		"scan_serial_no",
 		"barcode_font_size",
 		"company",
@@ -28,6 +30,22 @@
 			"fieldtype": "Check",
 			"in_list_view": 1,
 			"label": "Enable Handling Units"
+		},
+		{
+			"default": "1",
+			"description": "Maximum permitted nesting depth for the company. 1 disables nesting; 3 permits a member inside a Box inside a Pallet.",
+			"fieldname": "nest_cap",
+			"fieldtype": "Int",
+			"label": "Nest Cap",
+			"non_negative": 1
+		},
+		{
+			"default": "0",
+			"fieldname": "acknowledge_deeper_bundles",
+			"fieldtype": "Check",
+			"hidden": 1,
+			"label": "Acknowledge Deeper Bundles",
+			"no_copy": 1
 		},
 		{
 			"default": "12",
@@ -114,7 +132,7 @@
 		}
 	],
 	"links": [],
-	"modified": "2026-01-02 20:34:56.013615",
+	"modified": "2026-10-01 12:00:00.000000",
 	"modified_by": "Administrator",
 	"module": "BEAM",
 	"name": "BEAM Settings",

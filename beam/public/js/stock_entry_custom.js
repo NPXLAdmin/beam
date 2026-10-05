@@ -2,6 +2,9 @@
 // For license information, please see license.txt
 
 frappe.ui.form.on('Stock Entry', {
+	refresh(frm) {
+		add_scan_bundle_button(frm)
+	},
 	async before_cancel(frm) {
 		await set_recombine_handling_units(frm)
 	},
@@ -20,6 +23,92 @@ frappe.ui.form.on('Stock Entry', {
 		})
 	},
 })
+
+// Nesting is off until a company raises Nest Cap, so the button appears only where bundles can exist
+function add_scan_bundle_button(frm) {
+	const nest_cap = frappe.boot.beam?.settings?.[frm.doc.company]?.nest_cap || 1
+	if (frm.doc.docstatus !== 0 || nest_cap <= 1) {
+		return
+	}
+	frm.add_custom_button(__('Scan Bundle'), () => scan_bundle_dialog(frm), __('Handling Units'))
+}
+
+// Stands in for scanning a container's label: the scan goes through the same resolution as a
+// hardware scanner, so every Handling Unit holding stock beneath the bundle becomes one row
+function scan_bundle_dialog(frm) {
+	const dialog = new frappe.ui.Dialog({
+		title: __('Scan Bundle'),
+		fields: [
+			{
+				fieldname: 'bundle',
+				fieldtype: 'Data',
+				label: __('Handling Unit'),
+				reqd: 1,
+				description: __(
+					'Scan the container’s label. Every Handling Unit holding stock beneath it becomes one row, at any depth.'
+				),
+				change: () => preview_bundle(dialog),
+			},
+			{ fieldname: 'preview', fieldtype: 'HTML' },
+		],
+		primary_action_label: __('Add Rows'),
+		primary_action(values) {
+			if (!dialog.bundle_preview) {
+				frappe.msgprint(__('{0} is not a bundle.', [values.bundle]))
+				return
+			}
+			add_bundle_rows(frm, dialog)
+		},
+	})
+	dialog.show()
+}
+
+function preview_bundle(dialog) {
+	const barcode = (dialog.get_value('bundle') || '').trim()
+	dialog.bundle_preview = null
+	if (!barcode) {
+		return
+	}
+	frappe.xcall('beam.beam.bundle.get_bundle_preview', { barcode }).then(preview => {
+		dialog.bundle_preview = preview
+		dialog.get_field('preview').$wrapper.html(preview ? bundle_preview_html(preview) : '')
+	})
+}
+
+function bundle_preview_html(preview) {
+	const leaves = preview.leaves
+		.map(
+			leaf => `<div>${frappe.utils.escape_html(leaf.item_code || leaf.handling_unit)}
+				<span class="text-muted">${format_number(leaf.stock_qty || 0)} ${frappe.utils.escape_html(
+					leaf.stock_uom || ''
+				)} · ${frappe.utils.escape_html(leaf.handling_unit)}</span></div>`
+		)
+		.join('')
+	return `<div class="text-muted" style="margin-bottom:.35rem">
+			${frappe.utils.escape_html(preview.bundle_type || '')} · ${__('Level')} ${preview.level} ·
+			${__('{0} rows will be added', [preview.leaves.length])}
+		</div>${leaves}`
+}
+
+function add_bundle_rows(frm, dialog) {
+	const preview = dialog.bundle_preview
+	if (!preview.leaves.length) {
+		frappe.msgprint(__('That bundle holds nothing.'))
+		return
+	}
+	frappe
+		.xcall('beam.beam.scan.scan', { barcode: preview.bundle, context: { frm: frm.doctype, doc: frm.doc } })
+		.then(actions => {
+			if (actions && actions.length) {
+				window.scanHandler.dispatch(actions)
+			}
+			dialog.hide()
+			frappe.show_alert({
+				message: __('Added {0} rows from {1}', [preview.leaves.length, preview.bundle]),
+				indicator: 'green',
+			})
+		})
+}
 
 async function show_handling_unit_recombine_dialog(frm) {
 	const data = await get_handling_units(frm)

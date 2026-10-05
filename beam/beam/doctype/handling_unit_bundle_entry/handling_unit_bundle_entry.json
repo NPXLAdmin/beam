@@ -1,0 +1,304 @@
+{
+	"actions": [],
+	"allow_import": 1,
+	"autoname": "naming_series:",
+	"creation": "2026-10-01 12:00:00.000000",
+	"description": "One packing or unpacking event. A bundle's contents are the fold of all its submitted entries in posting order, where Pack adds and Unpack removes. Nothing is posted to the Stock Ledger.",
+	"doctype": "DocType",
+	"editable_grid": 1,
+	"engine": "InnoDB",
+	"field_order": [
+		"naming_series",
+		"company",
+		"purpose",
+		"posting_datetime",
+		"column_break_entry",
+		"handling_unit",
+		"bundle_type",
+		"level",
+		"identifier_section",
+		"container_identifier",
+		"column_break_identifier",
+		"identifier_scheme_doctype",
+		"identifier_scheme",
+		"kit_section",
+		"product_bundle",
+		"kit_complete",
+		"column_break_kit",
+		"warehouse",
+		"items_section",
+		"items",
+		"contents_preview",
+		"more_info_section",
+		"system_generated",
+		"column_break_more_info",
+		"voucher_type",
+		"voucher_no",
+		"amended_from"
+	],
+	"fields": [
+		{
+			"default": "HU-BE-.YYYY.-",
+			"fieldname": "naming_series",
+			"fieldtype": "Select",
+			"label": "Series",
+			"no_copy": 1,
+			"options": "HU-BE-.YYYY.-",
+			"print_hide": 1,
+			"reqd": 1,
+			"set_only_once": 1
+		},
+		{
+			"description": "Determines which BEAM Settings record supplies Nest Cap.",
+			"fieldname": "company",
+			"fieldtype": "Link",
+			"in_standard_filter": 1,
+			"label": "Company",
+			"options": "Company",
+			"remember_last_selected_value": 1,
+			"reqd": 1
+		},
+		{
+			"default": "Pack",
+			"fieldname": "purpose",
+			"fieldtype": "Select",
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+			"label": "Purpose",
+			"options": "Pack\nUnpack",
+			"reqd": 1
+		},
+		{
+			"default": "Now",
+			"description": "Establishes the order in which entries are applied when contents are calculated. This is not a stock posting date: nothing is posted to the Stock Ledger.",
+			"fieldname": "posting_datetime",
+			"fieldtype": "Datetime",
+			"label": "Posting Datetime",
+			"reqd": 1
+		},
+		{
+			"fieldname": "column_break_entry",
+			"fieldtype": "Column Break"
+		},
+		{
+			"description": "The bundle itself. Scan it where the container is reusable and already labelled; leave it empty for a new container, and a Handling Unit is created on first save.",
+			"fieldname": "handling_unit",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+			"label": "Handling Unit",
+			"options": "Handling Unit",
+			"search_index": 1,
+			"set_only_once": 1
+		},
+		{
+			"fieldname": "bundle_type",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+			"label": "Bundle Type",
+			"options": "Handling Unit Bundle Type",
+			"reqd": 1
+		},
+		{
+			"description": "Calculated nesting depth. Not stored, because a bundle inside another bundle may still be modified and any stored depth would age silently.",
+			"fieldname": "level",
+			"fieldtype": "Int",
+			"is_virtual": 1,
+			"label": "Level",
+			"read_only": 1
+		},
+		{
+			"collapsible": 1,
+			"collapsible_depends_on": "eval:doc.identifier_scheme || doc.container_identifier",
+			"fieldname": "identifier_section",
+			"fieldtype": "Section Break",
+			"label": "Container Identifier"
+		},
+		{
+			"description": "The printed identifier, for example a GS1 SSCC-18. Issued on submit, once contents are settled.",
+			"fieldname": "container_identifier",
+			"fieldtype": "Data",
+			"label": "Container Identifier",
+			"no_copy": 1,
+			"read_only": 1,
+			"unique": 1
+		},
+		{
+			"fieldname": "column_break_identifier",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "identifier_scheme_doctype",
+			"fieldtype": "Link",
+			"label": "Identifier Scheme Doctype",
+			"options": "DocType"
+		},
+		{
+			"description": "The record that issues the Container Identifier, owned by the application defining the numbering rules.",
+			"fieldname": "identifier_scheme",
+			"fieldtype": "Dynamic Link",
+			"label": "Identifier Scheme",
+			"options": "identifier_scheme_doctype"
+		},
+		{
+			"collapsible": 1,
+			"collapsible_depends_on": "eval:doc.product_bundle",
+			"fieldname": "kit_section",
+			"fieldtype": "Section Break",
+			"label": "Kit"
+		},
+		{
+			"description": "Optional. Declares that the bundle is a kit of that shape.",
+			"fieldname": "product_bundle",
+			"fieldtype": "Link",
+			"label": "Product Bundle",
+			"options": "Product Bundle"
+		},
+		{
+			"default": "0",
+			"depends_on": "eval:doc.product_bundle",
+			"description": "Whether the contents match every Product Bundle Item row, item for item and quantity for quantity. Reported, not enforced.",
+			"fieldname": "kit_complete",
+			"fieldtype": "Check",
+			"label": "Kit Complete",
+			"read_only": 1
+		},
+		{
+			"fieldname": "column_break_kit",
+			"fieldtype": "Column Break"
+		},
+		{
+			"description": "Derived from the contents, which must all be in one warehouse.",
+			"fieldname": "warehouse",
+			"fieldtype": "Link",
+			"in_standard_filter": 1,
+			"label": "Warehouse",
+			"options": "Warehouse",
+			"read_only": 1
+		},
+		{
+			"fieldname": "items_section",
+			"fieldtype": "Section Break"
+		},
+		{
+			"fieldname": "items",
+			"fieldtype": "Table",
+			"label": "Packed Handling Units",
+			"options": "Packed Handling Unit",
+			"reqd": 1
+		},
+		{
+			"fieldname": "contents_preview",
+			"fieldtype": "HTML",
+			"label": "Bundle Contents"
+		},
+		{
+			"collapsible": 1,
+			"collapsible_depends_on": "eval:doc.system_generated",
+			"fieldname": "more_info_section",
+			"fieldtype": "Section Break",
+			"label": "More Info"
+		},
+		{
+			"default": "0",
+			"description": "Created automatically when material was removed from inside a bundle, so reporting can separate operator actions from ledger self-correction.",
+			"fieldname": "system_generated",
+			"fieldtype": "Check",
+			"label": "System Generated",
+			"no_copy": 1,
+			"read_only": 1
+		},
+		{
+			"fieldname": "column_break_more_info",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "voucher_type",
+			"fieldtype": "Link",
+			"label": "Voucher Type",
+			"options": "DocType",
+			"read_only": 1
+		},
+		{
+			"description": "On a system-generated entry, the document that caused the removal.",
+			"fieldname": "voucher_no",
+			"fieldtype": "Dynamic Link",
+			"label": "Voucher No",
+			"options": "voucher_type",
+			"read_only": 1
+		},
+		{
+			"fieldname": "amended_from",
+			"fieldtype": "Link",
+			"label": "Amended From",
+			"no_copy": 1,
+			"options": "Handling Unit Bundle Entry",
+			"print_hide": 1,
+			"read_only": 1,
+			"search_index": 1
+		}
+	],
+	"index_web_pages_for_search": 1,
+	"is_submittable": 1,
+	"links": [],
+	"modified": "2026-10-01 18:00:00.000000",
+	"modified_by": "Administrator",
+	"module": "BEAM",
+	"name": "Handling Unit Bundle Entry",
+	"naming_rule": "By \"Naming Series\" field",
+	"owner": "Administrator",
+	"permissions": [
+		{
+			"create": 1,
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "Stock User",
+			"select": 1,
+			"share": 1,
+			"submit": 1,
+			"write": 1
+		},
+		{
+			"amend": 1,
+			"cancel": 1,
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"import": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "Stock Manager",
+			"select": 1,
+			"share": 1,
+			"submit": 1,
+			"write": 1
+		},
+		{
+			"amend": 1,
+			"cancel": 1,
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"import": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "System Manager",
+			"select": 1,
+			"share": 1,
+			"submit": 1,
+			"write": 1
+		}
+	],
+	"sort_field": "modified",
+	"sort_order": "DESC",
+	"states": [],
+	"track_changes": 1
+}

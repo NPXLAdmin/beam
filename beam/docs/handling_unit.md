@@ -4,13 +4,15 @@ For license information, please see license.txt-->
 # Handling Unit
 
 <div class="byline">
-  Tyler Matteson 2026-02-23
+  Claude Opus 5.5, Rohan Bansal, Robert Duncan, fproldan, github-actions, Heather Kusmierz, and Tyler Matteson 2026-10-01
 </div>
 
 
 A Handling Unit is an abstraction for tracking quantities of items that are moved or stored together. It does not replace Batch or Serial numbers, the manufacture of an Item, or the functionality of the Product Bundle, but can supplement these as a way of conveniently grabbing information that would otherwise require a lot of keystrokes to enter.
 
 By assigning a unique ID to the Handling Unit, it is possible to capture via scanner the item, net quantity, unit of measure and timestamp of the previous transaction, and then act upon that information in context, according to the [decision matrix](./matrix.md). BEAM adds a new doctype, Handling Unit, to implement this functionality in ERPNext.
+
+A Handling Unit holds one quantity of one item. Several Handling Units that travel together — eaches in a box, boxes on a pallet — can be bundled into a container with a Handling Unit of its own, so one scan brings all of them onto a document. See [Nested Handling Units](./handling_unit_nesting.md).
 
 ![Screen shot of the Handling Unit doctype listview. The list shows several new Handling Units that were created for items received via a Purchase Receipt.](./assets/handling_unit_list.png)
 

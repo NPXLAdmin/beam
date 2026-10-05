@@ -19,10 +19,11 @@ def get_beam_settings():
 	settings = {}
 	beam_settings = frappe.get_all(
 		"BEAM Settings",
-		fields=["company", "enable_handling_units"],
+		fields=["company", "enable_handling_units", "nest_cap"],
 	)
 	for setting in beam_settings:
 		settings[setting.company] = {
 			"enable_handling_units": setting.enable_handling_units,
+			"nest_cap": setting.nest_cap,
 		}
 	return settings
