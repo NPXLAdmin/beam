@@ -471,13 +471,9 @@ def get_form_action(barcode_doc: frappe._dict, context: frappe._dict) -> list[di
 				"dn_detail": serial_no_details.dn_detail,
 			}
 		)
-	elif has_frm_override:
-		target = frappe._dict(
-			{
-				"doctype": barcode_doc.doc.doctype,
-				"name": barcode_doc.doc.name,
-			}
-		)
+
+	if has_frm_override:
+		target = get_hooked_target(barcode_doc, context, target)
 
 	if not target:
 		return []
@@ -507,6 +503,22 @@ def get_form_action(barcode_doc: frappe._dict, context: frappe._dict) -> list[di
 			action["target"] = target.get(serialized_target[1])
 
 	return actions
+
+
+def get_hooked_target(
+	barcode_doc: frappe._dict, context: frappe._dict, target: frappe._dict | None
+) -> frappe._dict:
+	"""
+	The target for a form an app overrides with beam_frm. Builders registered on beam_frm_target
+	are tried in order, with BEAM's own target or None where BEAM builds none: each may build a
+	target for its app's doctypes, extend BEAM's, or return None to pass. Failing all of them, a
+	document BEAM builds no target for is passed as itself.
+	"""
+	for builder in frappe.get_hooks("beam_frm_target"):
+		hooked = frappe.call(builder, barcode_doc=barcode_doc, context=context, target=target)
+		if hooked:
+			return hooked
+	return target or frappe._dict({"doctype": barcode_doc.doc.doctype, "name": barcode_doc.doc.name})
 
 
 def get_bundle_entry_form_action(handling_unit: str) -> list[dict[str, Any]]:

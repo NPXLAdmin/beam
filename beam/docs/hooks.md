@@ -56,6 +56,26 @@ beam_client = {
 
 ```
 
+A `beam_frm` action reads its value from the scan's target, as in `target.item_code` above. BEAM builds that target for Handling Units, Items and Serial Numbers; anything else scanned on a form you override is passed as its own `doctype` and `name`. To build a target for your application's doctypes, or to add values to the one BEAM built, register a builder in `beam_frm_target`. Builders are tried in order for every scan on a form with a `beam_frm` override. Each receives the barcode's context, the scan context, and BEAM's target (or `None` where BEAM builds none), and returns a target or `None` to pass to the next builder.
+
+```python
+# hooks.py
+
+beam_frm_target = ["custom_app.scan.build_scan_target"]
+```
+
+```python
+# custom_app/scan.py
+
+def build_scan_target(barcode_doc, context, target=None):
+	if barcode_doc.doc.doctype == "Shipment":
+		# the form being scanned into, and the shipment that was scanned
+		return frappe._dict(name=context.doc.get("name"), barcode_doc=barcode_doc.doc.name)
+	if barcode_doc.doc.doctype == "Handling Unit" and target:
+		target.batch_no = get_batch(target.handling_unit)
+		return target
+```
+
 ## Nesting hooks
 
 [Nested Handling Units](./handling_unit_nesting.md) publish two hooks, so an application can apply its own nesting rules or issue container identifiers in its own format without changing BEAM.
