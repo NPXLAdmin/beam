@@ -156,13 +156,15 @@ class HandlingUnitBundleEntry(Document):
 	def validate_warehouse_consistency(self):
 		"""
 		Everything inside a bundle is in one warehouse. Only a Pack can break that; an Unpack
-		takes things out, so it records where the remainder is without refusing.
+		takes things out. Nothing is stored: where a bundle is changes whenever its contents
+		move, so it is read from the ledger wherever it is shown.
 		"""
+		if self.purpose != "Pack":
+			return
 		warehouses = {
 			balance.warehouse for balance in self.get_projected_leaf_balances() if balance.warehouse
 		}
-		self.warehouse = next(iter(warehouses)) if len(warehouses) == 1 else None
-		if self.purpose == "Pack" and len(warehouses) > 1:
+		if len(warehouses) > 1:
 			frappe.throw(
 				_("A bundle cannot straddle warehouses. This entry mixes {0}.").format(
 					comma_and(sorted(warehouses), add_quotes=False)
