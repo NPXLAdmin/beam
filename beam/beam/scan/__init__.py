@@ -12,23 +12,13 @@ from erpnext.stock.get_item_details import get_item_details, get_valuation_rate
 from frappe.query_builder import Case, DocType
 from frappe.query_builder.custom import ConstantColumn
 from frappe.query_builder.functions import Coalesce
+from frappe.utils import flt
 
 from beam.beam.bundle import (
 	get_bundle_leaves,
 	get_leaf_balances,
 	get_packed_row_details,
 	is_container,
-)
-
-
-# Frappe v16 rejects string-form SQL functions in SELECT and requires the dict form; v15 has no
-# dict-function support and requires the string form. The two are mutually exclusive, so the
-# aggregate field for get_handling_unit must be chosen by version to keep BEAM v15/v16 compatible.
-_FRAPPE_MAJOR = int(frappe.__version__.split(".")[0])
-_STOCK_QTY_FIELD = (
-	{"SUM": "actual_qty", "as": "stock_qty"}
-	if _FRAPPE_MAJOR >= 16
-	else "SUM(actual_qty) as stock_qty"
 )
 
 
@@ -143,30 +133,8 @@ def get_handling_unit(
 	The stock a Handling Unit holds, from its ledger entries. Returns None for a bundle, which
 	never holds stock of its own: use `beam.beam.bundle.get_bundle_leaves` for its contents.
 	"""
-	sl_entries = frappe.get_all(
-		"Stock Ledger Entry",
-		filters={"handling_unit": handling_unit, "is_cancelled": 0},
-		fields=[
-			"item_code",
-			_STOCK_QTY_FIELD,
-			"company",
-			"handling_unit",
-			"voucher_no",
-			"posting_date",
-			"posting_time",
-			"stock_uom",
-			"voucher_type",
-			"voucher_detail_no",
-			"warehouse",
-		]
-		+ (inv_dims if inv_dims else []),
-		group_by="handling_unit",
-		order_by="posting_date DESC",
-		limit=1,
-	)
-	if len(sl_entries) == 1:
-		sle = sl_entries[0]
-	else:
+	sle = get_current_entry(handling_unit, inv_dims)
+	if not sle:
 		return  # no entries exist
 
 	child_doctype = (
@@ -218,6 +186,60 @@ def get_handling_unit(
 	sle.pop("posting_time")
 	sle.pop("voucher_detail_no")
 	return sle
+
+
+def get_current_entry(handling_unit: str, inv_dims: list | None = None) -> frappe._dict | None:
+	"""
+	The Handling Unit's stock where it is now. Balances are taken per warehouse: a unit kept on a
+	full transfer has entries in both, and summing across them hides where the stock went. The
+	unit is where it still holds stock, or where it last moved once it holds none, and is described
+	by the latest entry that brought stock there, which carries the UOM it was moved in.
+	"""
+	entries = get_ledger_entries(handling_unit, inv_dims)
+	if not entries:
+		return None
+	balances = get_warehouse_balances(entries)
+	# newest first, so the first warehouse still holding stock is where the unit is now
+	warehouse = next(
+		(entry.warehouse for entry in entries if balances[entry.warehouse] > 0), entries[0].warehouse
+	)
+	here = [entry for entry in entries if entry.warehouse == warehouse]
+	sle = next((entry for entry in here if entry.actual_qty > 0), here[0])
+	sle.stock_qty = balances[warehouse]
+	sle.pop("actual_qty")
+	return sle
+
+
+def get_ledger_entries(handling_unit: str, inv_dims: list | None = None) -> list[frappe._dict]:
+	return frappe.get_all(
+		"Stock Ledger Entry",
+		filters={"handling_unit": handling_unit, "is_cancelled": 0},
+		fields=[
+			"item_code",
+			"actual_qty",
+			"company",
+			"handling_unit",
+			"voucher_no",
+			"posting_date",
+			"posting_time",
+			"stock_uom",
+			"voucher_type",
+			"voucher_detail_no",
+			"warehouse",
+		]
+		+ (inv_dims or []),
+		order_by="posting_date desc, posting_time desc, creation desc",
+	)
+
+
+def get_warehouse_balances(entries: list[frappe._dict]) -> dict[str, float]:
+	precision = frappe.get_precision("Stock Ledger Entry", "actual_qty")
+	balances: dict[str, float] = {}
+	for entry in entries:
+		balances[entry.warehouse] = flt(
+			balances.get(entry.warehouse, 0.0) + flt(entry.actual_qty), precision
+		)
+	return balances
 
 
 def get_stock_entry_item_details(doc: dict, item_code: str) -> frappe._dict:

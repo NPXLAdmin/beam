@@ -652,6 +652,19 @@ def test_scanning_a_bundle_adds_a_row_per_leaf(nest_cap):
 	assert {action["context"]["item_code"] for action in actions} == {PIE, OTHER_PIE}
 
 
+@pytest.mark.order(346)
+def test_scanning_a_bundle_that_moved_uses_where_it_is_now(nest_cap, carry_forward):
+	bundle_type("Box")
+	leaves = [receive(), receive()]
+	box = pack(leaves)
+	transfer_to_kitchen({leaf: 10 for leaf in leaves})
+	# the kept Handling Unit has entries in both warehouses; its stock is only in the Kitchen
+	assert get_handling_unit(leaves[0]).warehouse == KITCHEN
+	assert get_handling_unit(leaves[0]).stock_qty == 10
+	actions = scan_form(box.handling_unit, "Stock Entry")
+	assert {action["context"]["warehouse"] for action in actions} == {KITCHEN}
+
+
 @pytest.mark.order(332)
 def test_scanning_a_bundle_in_a_list_filters_by_its_leaves(nest_cap):
 	bundle_type("Box")
