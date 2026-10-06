@@ -153,7 +153,6 @@ def test_pack_records_contents_without_moving_stock(nest_cap):
 	assert get_container_of(leaves[0]) == entry.handling_unit
 	assert get_bundle_entry_of(entry.handling_unit) == entry.name
 	assert is_container([entry.handling_unit, leaves[0]]) == {entry.handling_unit}
-	assert entry.warehouse == BAKED_GOODS
 	assert {row.item_code for row in entry.items} == {PIE, OTHER_PIE}
 	assert get_handling_unit(entry.handling_unit) is None
 
@@ -610,6 +609,8 @@ def test_moving_a_whole_pallet_keeps_it_intact(nest_cap, carry_forward):
 	assert not frappe.db.exists(
 		"Handling Unit Bundle Entry", {"system_generated": 1, "handling_unit": box.handling_unit}
 	)
+	# where a bundle is follows its contents; nothing stored on the entry goes stale
+	assert get_entry_preview(pallet.as_dict())["warehouses"] == [KITCHEN]
 
 
 @pytest.mark.order(330)

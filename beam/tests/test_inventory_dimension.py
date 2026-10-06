@@ -6,6 +6,7 @@ import pytest
 
 from beam.beam.inventory_dimension import (
 	propagate_inventory_dimensions,
+	propagate_manufacture_dimensions,
 	setup_inventory_dimensions,
 )
 from beam.beam.scan import clear_inv_dim_cache, get_inv_dim_source_fieldnames
@@ -233,6 +234,91 @@ def test_propagate_skips_rows_without_item_code():
 			"Inventory Dimension", "Handling Unit", "custom_carry_forward", original or 0
 		)
 		clear_inv_dim_cache()
+
+
+# --- propagate_manufacture_dimensions ----------------------------------------
+
+
+@pytest.fixture()
+def carry_through_manufacture():
+	"""Handling Unit flagged to carry forward on Manufacture, with consumption not itemized"""
+	flags = ("custom_carry_forward", "custom_carry_forward_manufacture")
+	original = frappe.db.get_value("Inventory Dimension", "Handling Unit", flags, as_dict=True)
+	consumption = frappe.db.get_single_value("Manufacturing Settings", "material_consumption")
+	frappe.db.set_value("Inventory Dimension", "Handling Unit", {flag: 1 for flag in flags})
+	frappe.db.set_single_value("Manufacturing Settings", "material_consumption", 0)
+	clear_inv_dim_cache()
+	yield
+	frappe.db.set_value(
+		"Inventory Dimension", "Handling Unit", {flag: original[flag] or 0 for flag in flags}
+	)
+	frappe.db.set_single_value("Manufacturing Settings", "material_consumption", consumption)
+	clear_inv_dim_cache()
+
+
+def manufacture_entry(raw_material_values, finished_value=None, purpose="Manufacture"):
+	doc = frappe.new_doc("Stock Entry")
+	doc.purpose = purpose
+	for value in raw_material_values:
+		doc.append(
+			"items",
+			{"item_code": "Ambrosia Pie", "s_warehouse": "Kitchen - APC", "handling_unit": value},
+		)
+	doc.append(
+		"items",
+		{
+			"item_code": "Ambrosia Pie",
+			"t_warehouse": "Baked Goods - APC",
+			"is_finished_item": 1,
+			"handling_unit": finished_value,
+		},
+	)
+	doc.append(
+		"items", {"item_code": "Ambrosia Pie", "t_warehouse": "Baked Goods - APC", "is_scrap_item": 1}
+	)
+	return doc
+
+
+def test_manufacture_carries_the_raw_material_value_to_finished_and_scrap_rows(
+	carry_through_manufacture,
+):
+	doc = manufacture_entry(["HU-RM", "HU-RM"])
+	propagate_manufacture_dimensions(doc)
+	assert [row.handling_unit for row in doc.items] == ["HU-RM", "HU-RM", "HU-RM", "HU-RM"]
+
+
+def test_manufacture_keeps_a_value_already_on_the_finished_good(carry_through_manufacture):
+	doc = manufacture_entry(["HU-RM"], finished_value="HU-FG")
+	propagate_manufacture_dimensions(doc)
+	assert doc.items[1].handling_unit == "HU-FG"
+	assert doc.items[2].handling_unit == "HU-RM"
+
+
+def test_manufacture_with_differing_raw_material_values_raises(carry_through_manufacture):
+	doc = manufacture_entry(["HU-RM-1", "HU-RM-2"])
+	with pytest.raises(frappe.ValidationError, match="raw materials have differing values"):
+		propagate_manufacture_dimensions(doc)
+
+
+def test_manufacture_carry_forward_needs_the_dimension_flag(carry_through_manufacture):
+	frappe.db.set_value("Inventory Dimension", "Handling Unit", "custom_carry_forward_manufacture", 0)
+	clear_inv_dim_cache()
+	doc = manufacture_entry(["HU-RM"])
+	propagate_manufacture_dimensions(doc)
+	assert not doc.items[1].handling_unit
+
+
+def test_manufacture_carry_forward_skips_itemized_consumption(carry_through_manufacture):
+	frappe.db.set_single_value("Manufacturing Settings", "material_consumption", 1)
+	doc = manufacture_entry(["HU-RM"])
+	propagate_manufacture_dimensions(doc)
+	assert not doc.items[1].handling_unit
+
+
+def test_manufacture_carry_forward_ignores_other_purposes(carry_through_manufacture):
+	doc = manufacture_entry(["HU-RM"], purpose="Repack")
+	propagate_manufacture_dimensions(doc)
+	assert not doc.items[1].handling_unit
 
 
 # --- HU carry-forward integration tests --------------------------------------

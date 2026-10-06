@@ -23,9 +23,8 @@
 		"identifier_scheme",
 		"kit_section",
 		"product_bundle",
-		"kit_complete",
 		"column_break_kit",
-		"warehouse",
+		"kit_complete",
 		"items_section",
 		"items",
 		"contents_preview",
@@ -167,15 +166,6 @@
 		{
 			"fieldname": "column_break_kit",
 			"fieldtype": "Column Break"
-		},
-		{
-			"description": "Derived from the contents, which must all be in one warehouse.",
-			"fieldname": "warehouse",
-			"fieldtype": "Link",
-			"in_standard_filter": 1,
-			"label": "Warehouse",
-			"options": "Warehouse",
-			"read_only": 1
 		},
 		{
 			"fieldname": "items_section",
