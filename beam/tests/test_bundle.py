@@ -565,6 +565,49 @@ def test_partial_use_leaves_a_member_packed(nest_cap):
 	assert get_bundle_contents(box) == [leaf]
 
 
+@pytest.mark.order(347)
+def test_repack_split_leaves_the_source_packed(nest_cap):
+	bundle_type("Box")
+	split, kept = receive(), receive()
+	box = pack([split, kept])
+	repack = stock_entry(
+		"Repack",
+		[
+			{"item_code": PIE, "qty": 4, "s_warehouse": BAKED_GOODS, "handling_unit": split},
+			{"item_code": PIE, "qty": 4, "t_warehouse": BAKED_GOODS},
+		],
+	)
+	split_off = repack.items[1].handling_unit
+	assert split_off and split_off != split
+	# a bundle lists Handling Units and reads their quantities from the ledger, so the source
+	# stays packed with its remainder and nothing is written: what was split off was never inside
+	assert get_bundle_contents(box.handling_unit) == [split, kept]
+	assert get_handling_unit(split).stock_qty == 6
+	assert get_container_of(split_off) is None
+	assert not frappe.db.exists("Handling Unit Bundle Entry", {"voucher_no": repack.name})
+	assert get_entry_preview(box.as_dict())["total_qty"] == 16
+
+
+@pytest.mark.order(348)
+def test_repack_split_using_up_the_source_unpacks_it(nest_cap):
+	bundle_type("Box")
+	split, kept = receive(), receive()
+	box = pack([split, kept]).handling_unit
+	repack = stock_entry(
+		"Repack",
+		[
+			{"item_code": PIE, "qty": 10, "s_warehouse": BAKED_GOODS, "handling_unit": split},
+			{"item_code": PIE, "qty": 4, "t_warehouse": BAKED_GOODS},
+			{"item_code": PIE, "qty": 6, "t_warehouse": BAKED_GOODS},
+		],
+	)
+	assert get_bundle_contents(box) == [kept]
+	unpack = system_unpack_for(repack)
+	assert [row.container_handling_unit for row in unpack.items] == [split]
+	# BEAM never packs a unit by itself, so both new units are loose
+	assert all(get_container_of(row.handling_unit) is None for row in repack.items[1:])
+
+
 @pytest.mark.order(328)
 def test_moving_one_member_away_unpacks_it(nest_cap, carry_forward):
 	bundle_type("Box")
