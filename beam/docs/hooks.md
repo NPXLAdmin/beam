@@ -4,7 +4,7 @@ For license information, please see license.txt-->
 # Extending BEAM With Custom Hooks
 
 <div class="byline">
-  Claude Opus 5.5, Rohan Bansal, Robert Duncan, Heather Kusmierz, and Tyler Matteson 2026-10-01
+  Claude Opus 5.5, Rohan Bansal, Robert Duncan, Heather Kusmierz, and Tyler Matteson 2026-10-06
 </div>
 
 
@@ -75,6 +75,22 @@ def build_scan_target(barcode_doc, context, target=None):
 		target.batch_no = get_batch(target.handling_unit)
 		return target
 ```
+
+A scanned [bundle](./handling_unit_nesting.md) holds no stock of its own, so by default a form gets one set of actions for every Handling Unit inside it, as if each had been scanned. That suits an items table. A form that handles the bundle itself, such as a screen that moves a pallet, takes it whole by adding `"bundle_scan": "whole"` to its Handling Unit actions:
+
+```python
+# hooks.py
+
+beam_frm = {
+	"Handling Unit": {
+		"Pallet Move": [
+			{"action": "pallet_move_scan", "target": "target.handling_unit", "bundle_scan": "whole"}
+		],
+	}
+}
+```
+
+Its actions then run once, for the bundle, with the target `{"doctype": "Pallet Move", "handling_unit": "<bundle>", "is_bundle": 1, "leaves": [...]}`. `leaves` lists the Handling Units beneath the bundle at any depth, whether or not they still hold stock, and the target has no item, quantity or warehouse. It goes through `beam_frm_target` like any other, so a builder for such a form must not read stock for `handling_unit` when `is_bundle` is set. On either kind of form, every action a scanned bundle produces carries `"bundle": "<bundle>"`, the bundle that was scanned. It is on the action rather than in its `context`, because `add_or_associate` turns the `context` into a row.
 
 ## Nesting hooks
 

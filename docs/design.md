@@ -4,7 +4,7 @@ For license information, please see license.txt-->
 # beam
 
 <div class="byline">
-  Claude Opus 5.5 and Robert Duncan 2026-10-08
+  Claude Opus 5.5 and Robert Duncan 2026-10-09
 </div>
 
 Design documents for features in `apps/beam/`. Each feature is one `##` subsection below; the
@@ -27,6 +27,7 @@ able to pack them into bundles as it is submitted.
 |---|---|
 | Built, unchanged | Reconciliation rules R1–R7 (§ 4.1) |
 | This release: tests only | B1, B4 and the Repack split (§ 4.2). The code already behaves this way; the tests pin it. |
+| This release: built | N9, scanning a bundle whole (§ 4.2) |
 | Designed, not built | N1–N8 (§ 4.3) |
 
 ### 2. Problem / why now
@@ -43,6 +44,10 @@ able to pack them into bundles as it is submitted.
 - **Gaps found while mapping the cases** (§ 4.4): a bundle shipped whole leaves empty boxes behind
   and resolves to nothing; scanning an empty bundle does nothing and says nothing; moving a bundle
   without Handling Unit carry-forward empties it.
+- **Scanner screens lose the bundle.** A scanned bundle comes back as one action per unit inside
+  it. That suits a transaction's item table, but a screen that takes one Handling Unit per scan,
+  such as picking up a pallet to move it, reads the first action and gets one unit. It never
+  learns which bundle was scanned.
 
 ### 3. Target app
 
@@ -101,6 +106,46 @@ Scenario IDs refer to the matrix in § 4.4.
    New tests: `test_repack_split_leaves_the_source_packed`, and
    `test_repack_split_using_up_the_source_unpacks_it` for a split of all 10 (4 + 6): a is used up
    and unpacked (R1), and both new units are loose even if one is still physically in the box.
+
+**N9. Scanning a bundle whole** (built in this release)
+
+Fanning a bundle out into its units is right where each unit becomes a row, and wrong where the
+bundle is the thing being handled. The app that owns the form knows which it is, so the form
+chooses; the default stays one action per unit. (Decided 2026-10-29.)
+
+1. **Integration**: an app has a form take bundles whole by adding `"bundle_scan": "whole"` to its
+   `beam_frm` actions for Handling Unit on that form. Without the key, or with `"contents"`, the
+   form gets one action per unit. BEAM reads the key from the actions that run on the form: the
+   `beam_frm` override where there is one, otherwise BEAM's own. Hook lists from several apps are
+   merged, so one action asking for whole is enough.
+
+   ```python
+   beam_frm = {
+   	"Handling Unit": {
+   		"Pallet Move": [
+   			{"action": "pallet_move_scan", "target": "target.handling_unit", "bundle_scan": "whole"}
+   		],
+   	}
+   }
+   ```
+
+2. **User** scans a bundle on a form that takes bundles whole → the form's actions run once, for
+   the bundle. Their target is
+   `{"doctype": "<form>", "handling_unit": "<bundle>", "is_bundle": 1, "leaves": ["<Handling Unit>"]}`.
+   `leaves` are the units beneath the bundle at any depth, as `get_bundle_leaves` returns them,
+   whether or not they still hold stock. A bundle has no item, quantity or warehouse of its own,
+   so the target carries none. The bundle is passed whatever its state (N1), so N2's skipping and
+   alerts don't apply: the form decides what an empty or used-up bundle means.
+3. **System**, on a form with a `beam_frm` override that takes bundles whole → the bundle's target
+   goes through the `beam_frm_target` builders like any other. A builder for such a form must not
+   read stock for the target's `handling_unit` when `is_bundle` is set.
+4. **User** scans a bundle on any other form → one action per unit, as now (N2.1).
+5. **System**, on every form → each action a scanned bundle produces carries
+   `"bundle": "<bundle>"`, the name of the bundle that was scanned, so a form can tell a bundle
+   scan from a loose unit either way. It is on the action, not in its `context`, because
+   `add_or_associate` turns the `context` into the item row.
+6. Unchanged: scanning a loose unit on either kind of form; a Bundle Entry, which already takes a
+   scanned bundle as one row (N2.4); list views, which filter by the bundle's members (N2.3).
 
 #### 4.3 Designed, not built
 
@@ -283,6 +328,9 @@ Box{a, b} is a bundle holding units a and b; Pallet{Box1{a, b}, Box2{c}} is two 
 | F2 | Pack a Handling Unit with no ledger entries | allowed today; scanning the bundle errors | N7, N2 | Designed |
 | F3 | Pack an empty bundle | allowed | — | Built |
 | F4 | Scan a draft, empty or used-up bundle | nothing happens today | N2 | Designed |
+| F5 | Scan Pallet{Box1{a, b}, Box2{c}} on a form that takes bundles whole | the actions run once, for the pallet, with leaves a, b and c (before N9: one action per unit, so a form that read the first got a) | N9 | This release (tested) |
+| F6 | Scan Box{a, b} on a transaction form | a row for a and one for b, as before; each action names the box | N9 | This release (tested) |
+| F7 | Scan an empty bundle on a form that takes bundles whole | the bundle is passed with no leaves (before N9: nothing happened) | N9 | This release (tested) |
 | G1 | One receipt packs two pallets and leaves a row loose | two Packs naming the receipt | N6 | Designed |
 | G2 | Handling Units created at submit | rows resolve after they exist | N6 | Designed |
 | G3 | One receipt builds boxes onto a pallet | innermost first; Nest Cap on the whole | N6 | Designed |
@@ -334,15 +382,21 @@ These are `doc_events`, not part of BEAM's Stock Entry class. They run on eight 
 Entry class is also extended by other apps, and putting both steps inside one function fixes their
 order in code instead of in hook lists.
 
-**Other hooks** (N6; not built):
+**Other hooks** (N6 not built; N9 built):
 
 - `beam_packing_plan`: a list of dotted paths, each called as `(voucher) -> list[dict] | None`.
   Documented in `beam/docs/hooks.md`.
+- `beam_frm`: no new hook. Actions for Handling Unit take an optional `bundle_scan` key, `"whole"`
+  or `"contents"` (the default), read per form (N9.1). Documented in `beam/docs/hooks.md`.
 
 **File-direct edits:**
 
 - `beam/tests/test_bundle.py` — Add (this release): `test_repack_split_leaves_the_source_packed`,
-  `test_repack_split_using_up_the_source_unpacks_it`.
+  `test_repack_split_using_up_the_source_unpacks_it`. Add (N9):
+  `test_scanning_a_bundle_on_a_form_that_takes_it_whole` (F5),
+  `test_scanning_an_empty_bundle_on_a_form_that_takes_it_whole` (F7),
+  `test_scanning_a_bundle_names_it_on_each_action` (F6), and
+  `test_scanning_a_bundle_whole_passes_it_to_target_builders` (N9.3).
 - `beam/beam/bundle.py` — Add: `on_stock_voucher_submit`, `on_stock_voucher_cancel`,
   `check_voucher_packing_plan`, `check_packing_plan`, `pack_from_voucher`, `unpack_voucher` (N6);
   `get_bundle_state` (N1); the `BundleHomeRequired` exception, a `frappe.ValidationError` (N5).
@@ -365,6 +419,10 @@ order in code instead of in hook lists.
 - `beam/beam/scan/__init__.py` — Change: `get_container_form_actions` skips units holding no
   stock and raises the N2 alert when nothing is left; `get_container_list_actions` raises it for an
   Empty bundle; `get_bundle_entry_form_action` sets the container on an entry with none (N2.4).
+  For N9: `get_form_action` sends a bundle to a new `get_whole_bundle_actions` where a new
+  `takes_bundle_whole(form)` finds `"bundle_scan": "whole"`, otherwise to
+  `get_container_form_actions`; both set `bundle` on every action they return. Filling the
+  actions from the target moves out of `get_form_action` into a helper both paths share.
 - `beam/beam/doctype/beam_settings/beam_settings.py` — Add: the N3 warning in `validate`.
 - `beam/docs/handling_unit_nesting.md`, `beam/docs/hooks.md` — document each N item as it is
   built.
@@ -392,6 +450,9 @@ person submitting or cancelling the voucher needs rights on the voucher only.
 - `get_handling_unit` reporting a Purchase Receipt row's quantity instead of the balance. It is
   fixed separately.
 - Labels for bundles.
+- Which forms take bundles whole. Each app decides for its own forms (N9).
+- Naming the box a unit sits in when a pallet is fanned out. N9 names only the bundle that was
+  scanned; a form that needs the arrangement reads it with `beam.beam.bundle.walk`.
 
 ### 9. Open questions
 

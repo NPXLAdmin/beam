@@ -115,6 +115,29 @@ def scan_form(barcode, frm, doc=None):
 	return frappe.call("beam.beam.scan.scan", barcode=barcode, context=context, current_qty=1)
 
 
+def use_hooks(monkeypatch, **hooks):
+	"""Stand in for the scan hooks an app would register, such as beam_frm"""
+	original = frappe.get_hooks
+
+	def get_hooks(hook=None, *args, **kwargs):
+		if hook in hooks:
+			return hooks[hook]
+		return original(hook, *args, **kwargs)
+
+	monkeypatch.setattr(frappe, "get_hooks", get_hooks)
+
+
+def whole_bundle_form():
+	"""A form whose Handling Unit action takes a scanned bundle as itself (design N9)"""
+	return {
+		"Handling Unit": {
+			"Pallet Move": [
+				{"action": "pallet_move_scan", "target": "target.handling_unit", "bundle_scan": "whole"}
+			]
+		}
+	}
+
+
 # Bundle Type
 
 
@@ -872,17 +895,78 @@ def test_scanning_a_bundle_resolves_a_beam_frm_override_per_leaf(nest_cap, monke
 			"Stock Reconciliation": [{"action": "add_or_associate", "target": "target.handling_unit"}]
 		}
 	}
-	original = frappe.get_hooks
-
-	def get_hooks(hook=None, *args, **kwargs):
-		if hook == "beam_frm":
-			return override
-		return original(hook, *args, **kwargs)
-
-	monkeypatch.setattr(frappe, "get_hooks", get_hooks)
+	use_hooks(monkeypatch, beam_frm=override)
 	actions = scan_form(box.handling_unit, "Stock Reconciliation")
 	assert sorted(action["target"] for action in actions) == sorted(leaves)
 	assert override["Handling Unit"]["Stock Reconciliation"][0]["target"] == "target.handling_unit"
+
+
+@pytest.mark.order(349)
+def test_scanning_a_bundle_on_a_form_that_takes_it_whole(nest_cap, monkeypatch):
+	bundle_type("Box")
+	bundle_type("Pallet")
+	a, b, c = receive(), receive(OTHER_PIE), receive()
+	box1, box2 = pack([a, b]), pack([c])
+	pallet = pack([box1.handling_unit, box2.handling_unit], type_name="Pallet")
+	override = whole_bundle_form()
+	use_hooks(monkeypatch, beam_frm=override)
+	actions = scan_form(pallet.handling_unit, "Pallet Move")
+	assert len(actions) == 1
+	assert actions[0]["action"] == "pallet_move_scan"
+	assert actions[0]["target"] == pallet.handling_unit
+	assert actions[0]["bundle"] == pallet.handling_unit
+	target = actions[0]["context"]
+	assert target["is_bundle"] == 1
+	assert sorted(target["leaves"]) == sorted([a, b, c])
+	assert not {"item_code", "stock_qty", "warehouse"} & set(target)
+	# a unit scanned on the same form is still itself, and names no bundle
+	unit_actions = scan_form(a, "Pallet Move")
+	assert [action["target"] for action in unit_actions] == [a]
+	assert "bundle" not in unit_actions[0]
+	assert override["Handling Unit"]["Pallet Move"][0]["target"] == "target.handling_unit"
+
+
+@pytest.mark.order(350)
+def test_scanning_an_empty_bundle_on_a_form_that_takes_it_whole(nest_cap, monkeypatch):
+	bundle_type("Box")
+	leaf = receive()
+	box = pack([leaf]).handling_unit
+	pack([leaf], handling_unit=box, purpose="Unpack")
+	use_hooks(monkeypatch, beam_frm=whole_bundle_form())
+	actions = scan_form(box, "Pallet Move")
+	assert [action["target"] for action in actions] == [box]
+	assert actions[0]["context"]["leaves"] == []
+
+
+@pytest.mark.order(351)
+def test_scanning_a_bundle_names_it_on_each_action(nest_cap):
+	bundle_type("Box")
+	leaves = [receive(), receive(OTHER_PIE)]
+	box = pack(leaves).handling_unit
+	actions = scan_form(box, "Stock Reconciliation")
+	assert sorted({action["context"]["handling_unit"] for action in actions}) == sorted(leaves)
+	assert {action["bundle"] for action in actions} == {box}
+	# the context becomes the item row, so the bundle stays off it
+	assert not any("bundle" in action["context"] for action in actions)
+	assert not any("bundle" in action for action in scan_form(leaves[0], "Stock Reconciliation"))
+
+
+@pytest.mark.order(352)
+def test_scanning_a_bundle_whole_passes_it_to_target_builders(nest_cap, monkeypatch):
+	bundle_type("Box")
+	leaves = [receive(), receive()]
+	box = pack(leaves).handling_unit
+	seen = []
+
+	def build_scan_target(barcode_doc, context, target=None):
+		seen.append(target)
+		target.unit_count = len(target.leaves)
+		return target
+
+	use_hooks(monkeypatch, beam_frm=whole_bundle_form(), beam_frm_target=[build_scan_target])
+	actions = scan_form(box, "Pallet Move")
+	assert [target.handling_unit for target in seen] == [box]
+	assert actions[0]["context"]["unit_count"] == 2
 
 
 @pytest.mark.order(341)

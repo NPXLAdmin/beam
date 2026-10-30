@@ -338,13 +338,12 @@ def get_form_action(barcode_doc: frappe._dict, context: frappe._dict) -> list[di
 		if context.frm == "Handling Unit Bundle Entry":
 			return get_bundle_entry_form_action(barcode_doc.doc.name)
 		if is_container([barcode_doc.doc.name]):
+			if takes_bundle_whole(context.frm):
+				return get_whole_bundle_actions(barcode_doc, context)
 			return get_container_form_actions(barcode_doc.doc.name, context)
 
 	target = None
-	beam_override = frappe.get_hooks("beam_frm")
-	has_frm_override = bool(
-		beam_override and beam_override.get(barcode_doc.doc.doctype, {}).get(context.frm)
-	)
+	has_frm_override = bool(get_frm_override(barcode_doc.doc.doctype, context.frm))
 
 	if barcode_doc.doc.doctype == "Handling Unit":
 		inv_dims = get_inv_dim_source_fieldnames()
@@ -478,30 +477,34 @@ def get_form_action(barcode_doc: frappe._dict, context: frappe._dict) -> list[di
 	if not target:
 		return []
 
-	if beam_override:
-		override_doctype = beam_override.get(barcode_doc.doc.doctype)
-		if override_doctype:
-			override_action = override_doctype.get(context.frm)
-			if override_action:
-				# the hook configs are shared for the whole request, so rewrite a copy: a
-				# bundle's fan-out resolves one action per Handling Unit in a single request
-				override_action = copy.deepcopy(override_action)
-				for action in override_action:
-					action["context"] = target
-					if "." in action.get("target"):
-						serialized_target = action.get("target").split(".")
-						action["target"] = target.get(serialized_target[1])
-				return override_action
+	return fill_actions(barcode_doc.doc.doctype, context.frm, target)
 
-	# the action configs are shared module state, so rewrite a copy
-	actions = copy.deepcopy(frm.get(barcode_doc.doc.doctype, {}).get(context.frm, []))
+
+def get_frm_override(doctype: str, form: str) -> list[dict[str, Any]]:
+	"""The actions an app's beam_frm hook sets for a scan of this doctype on this form"""
+	beam_override = frappe.get_hooks("beam_frm")
+	return beam_override.get(doctype, {}).get(form, []) if beam_override else []
+
+
+def get_configured_actions(doctype: str, form: str) -> list[dict[str, Any]]:
+	"""
+	The actions a scan of this doctype runs on this form: an app's beam_frm override where there
+	is one, otherwise BEAM's own. These are shared for the whole request, so never rewrite them.
+	"""
+	return get_frm_override(doctype, form) or frm.get(doctype, {}).get(form, [])
+
+
+def fill_actions(doctype: str, form: str, target: frappe._dict) -> list[dict[str, Any]]:
+	"""
+	The form's actions pointed at the target, with a `target.<field>` path resolved to that field.
+	Rewrites a copy: a bundle's fan-out resolves one target per Handling Unit in a single request.
+	"""
+	actions = copy.deepcopy(get_configured_actions(doctype, form))
 	for action in actions:
 		action["context"] = target
 		target_value = action.get("target")
 		if isinstance(target_value, str) and "." in target_value:
-			serialized_target = target_value.split(".")
-			action["target"] = target.get(serialized_target[1])
-
+			action["target"] = target.get(target_value.split(".")[1])
 	return actions
 
 
@@ -541,6 +544,36 @@ def get_container_form_actions(bundle: str, context: frappe._dict) -> list[dict[
 	for leaf in get_bundle_leaves(bundle):
 		leaf_doc = frappe._dict(doc=frappe.get_doc("Handling Unit", leaf), barcode=leaf)
 		actions.extend(get_form_action(leaf_doc, context))
+	return name_bundle(actions, bundle)
+
+
+def takes_bundle_whole(form: str) -> bool:
+	"""A form takes a scanned bundle as itself where any of its Handling Unit actions asks to"""
+	return any(
+		action.get("bundle_scan") == "whole" for action in get_configured_actions("Handling Unit", form)
+	)
+
+
+def get_whole_bundle_actions(
+	barcode_doc: frappe._dict, context: frappe._dict
+) -> list[dict[str, Any]]:
+	"""
+	On a form that takes bundles whole, the form's actions run once, for the bundle. It holds no
+	stock, so its target carries no item, quantity or warehouse, only the units beneath it.
+	"""
+	bundle = barcode_doc.doc.name
+	target = frappe._dict(
+		doctype=context.frm, handling_unit=bundle, is_bundle=1, leaves=get_bundle_leaves(bundle)
+	)
+	if get_frm_override("Handling Unit", context.frm):
+		target = get_hooked_target(barcode_doc, context, target)
+	return name_bundle(fill_actions("Handling Unit", context.frm, target), bundle)
+
+
+def name_bundle(actions: list[dict[str, Any]], bundle: str) -> list[dict[str, Any]]:
+	"""Each action names the bundle scanned, on the action: its context becomes the item row"""
+	for action in actions:
+		action["bundle"] = bundle
 	return actions
 
 

@@ -4,7 +4,7 @@ For license information, please see license.txt-->
 # Nested Handling Units
 
 <div class="byline">
-  Claude Opus 5.5 and Robert Duncan 2026-10-01
+  Claude Opus 5.5 and Robert Duncan 2026-10-05
 </div>
 
 
@@ -169,6 +169,12 @@ Nest Cap for the company is above 1.
 
 In a list view, scanning a container filters to every document that references
 anything inside it.
+
+A screen that handles the container itself, such as one that moves a pallet,
+can instead take a scanned container whole: it receives the container and the
+list of Handling Units inside it, and decides what to do with them. Which
+screens do this is up to the application that provides them; see
+[Extending BEAM With Custom Hooks](./hooks.md).
 
 The [Handling Unit Traceability report](./hu_traceability_report.md) continues to
 work as before, tracing the leaves.
