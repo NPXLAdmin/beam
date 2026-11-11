@@ -151,9 +151,6 @@ def get_handling_unit(
 		if child_meta.has_field(field)
 	]
 
-	if child_doctype == "Purchase Receipt Item":
-		child_doctype_fields.append("stock_qty")
-
 	item = frappe.db.get_value(
 		child_doctype,
 		sle.voucher_detail_no,
