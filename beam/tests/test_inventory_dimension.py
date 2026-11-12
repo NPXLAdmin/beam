@@ -308,11 +308,20 @@ def test_manufacture_carry_forward_needs_the_dimension_flag(carry_through_manufa
 	assert not doc.items[1].handling_unit
 
 
-def test_manufacture_carry_forward_skips_itemized_consumption(carry_through_manufacture):
+def test_manufacture_carry_forward_with_itemized_consumption(carry_through_manufacture):
+	# Consumption itemized: an entry that still consumes raw materials carries their value
 	frappe.db.set_single_value("Manufacturing Settings", "material_consumption", 1)
 	doc = manufacture_entry(["HU-RM"])
 	propagate_manufacture_dimensions(doc)
-	assert not doc.items[1].handling_unit
+	assert doc.items[1].handling_unit == "HU-RM"
+
+
+def test_manufacture_without_raw_materials_carries_nothing(carry_through_manufacture):
+	# The materials went through Material Consumption for Manufacture entries instead
+	frappe.db.set_single_value("Manufacturing Settings", "material_consumption", 1)
+	doc = manufacture_entry([])
+	propagate_manufacture_dimensions(doc)
+	assert not doc.items[0].handling_unit
 
 
 def test_manufacture_carry_forward_ignores_other_purposes(carry_through_manufacture):

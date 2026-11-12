@@ -3,7 +3,6 @@
 
 import frappe
 from frappe import _
-from frappe.utils import cint
 
 from beam.beam.scan.config import get_scan_doctypes
 
@@ -122,17 +121,18 @@ def propagate_manufacture_dimensions(doc, method=None):
 	value forward onto the finished-good and scrap rows' source field.
 
 	Only fires for dimensions flagged with `custom_carry_forward_manufacture` (a customer's
-	shipping unit, say, but not Handling Unit: a finished good gets a brand-new Handling Unit),
-	and only when consumption is not itemized (``Manufacturing Settings.material_consumption``
-	off), where the entry has a single material receipt.
+	shipping unit, say, but not Handling Unit: a finished good gets a brand-new Handling Unit).
+
+	It looks at the entry, not at ``Manufacturing Settings.material_consumption``: with
+	consumption itemized, a Manufacture entry that still consumes raw materials (one built from a
+	Work Order's BOM, say) carries their value forward like any other, and one that consumes none
+	(the materials went through Material Consumption for Manufacture entries) has nothing to
+	carry.
 
 	The raw material's value reaches the finished good's Stock Ledger Entry through the source
 	field: the finished-good row has only a target warehouse, so `propagate_inventory_dimensions`
 	skips it and the stock controller posts the plain source field to the SLE."""
 	if doc.doctype != "Stock Entry" or doc.purpose != "Manufacture":
-		return
-
-	if cint(frappe.db.get_single_value("Manufacturing Settings", "material_consumption")):
 		return
 
 	dims = [d for d in get_carry_forward_dims() if d.get("custom_carry_forward_manufacture")]
