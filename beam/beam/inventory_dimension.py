@@ -131,7 +131,8 @@ def propagate_manufacture_dimensions(doc, method=None):
 
 	The raw material's value reaches the finished good's Stock Ledger Entry through the source
 	field: the finished-good row has only a target warehouse, so `propagate_inventory_dimensions`
-	skips it and the stock controller posts the plain source field to the SLE."""
+	skips it, and `BEAMStockEntry.update_inventory_dimensions` posts the plain source field to the
+	SLE where ERPNext reads only the transfer field."""
 	if doc.doctype != "Stock Entry" or doc.purpose != "Manufacture":
 		return
 

@@ -2,6 +2,9 @@
 # For license information, please see license.txt
 
 import frappe
+from erpnext.stock.doctype.inventory_dimension.inventory_dimension import (
+	get_evaluated_inventory_dimension,
+)
 from erpnext.stock.doctype.stock_entry.stock_entry import StockEntry
 from frappe.utils import cstr, flt
 
@@ -109,6 +112,32 @@ class BEAMStockEntry(StockEntry):
 				sle["is_cancelled"] = 0
 				hu_sles.append(sle)
 		return hu_sles
+
+	def update_inventory_dimensions(self, row, sl_dict):
+		"""A finished good, repacked item or receipt posts the inventory dimensions set on its row.
+
+		ERPNext v15 (9a78283ecb, "incorrect inventory dimension for material transfer") reads the
+		transfer field ``to_<dimension>`` for every incoming Stock Entry row. A Manufacture or
+		Repack output, or a Material Receipt, has only a target warehouse and carries the plain
+		``<dimension>`` field, so its value never reaches the Stock Ledger Entry. This keeps
+		ERPNext's result and posts the plain field only where that left the dimension empty, as
+		ERPNext did before that change. propagate_manufacture_dimensions relies on it.
+		"""
+		super().update_inventory_dimensions(row, sl_dict)
+		item_row = row.get("item_row") or row
+		if not is_incoming_leg(item_row, sl_dict):
+			return
+		for dimension in get_evaluated_inventory_dimension(item_row, sl_dict, parent_doc=self):
+			if not dimension or sl_dict.get(dimension.target_fieldname):
+				continue
+			if value := item_row.get(dimension.source_fieldname):
+				sl_dict[dimension.target_fieldname] = value
+
+
+def is_incoming_leg(item_row, sl_dict) -> bool:
+	return (
+		item_row.get("t_warehouse") == sl_dict.get("warehouse") and flt(sl_dict.get("actual_qty")) > 0
+	)
 
 
 @frappe.whitelist()

@@ -330,6 +330,47 @@ def test_manufacture_carry_forward_ignores_other_purposes(carry_through_manufact
 	assert not doc.items[1].handling_unit
 
 
+# --- BEAMStockEntry.update_inventory_dimensions ------------------------------
+
+
+def ledger_dimensions(row, warehouse, actual_qty):
+	"""The Handling Unit the stock controller posts to the Stock Ledger Entry for this leg"""
+	from beam.beam.overrides.stock_entry import BEAMStockEntry
+
+	doc = BEAMStockEntry({"doctype": "Stock Entry", "purpose": "Material Receipt", "items": [row]})
+	sl_dict = frappe._dict(item_code=row["item_code"], warehouse=warehouse, actual_qty=actual_qty)
+	doc.update_inventory_dimensions(doc.items[0], sl_dict)
+	return sl_dict.get("handling_unit")
+
+
+def test_incoming_row_posts_its_plain_dimension():
+	# A receipt or finished-good row has no transfer field; ERPNext alone would post nothing
+	row = {"item_code": "Ambrosia Pie", "t_warehouse": "Baked Goods - APC", "handling_unit": "HU-IN"}
+	assert ledger_dimensions(row, "Baked Goods - APC", 1) == "HU-IN"
+
+
+def test_incoming_transfer_leg_keeps_the_transfer_field():
+	row = {
+		"item_code": "Ambrosia Pie",
+		"s_warehouse": "Kitchen - APC",
+		"t_warehouse": "Baked Goods - APC",
+		"handling_unit": "HU-FROM",
+		"to_handling_unit": "HU-TO",
+	}
+	assert ledger_dimensions(row, "Baked Goods - APC", 1) == "HU-TO"
+
+
+def test_outgoing_leg_is_left_to_erpnext():
+	row = {
+		"item_code": "Ambrosia Pie",
+		"s_warehouse": "Kitchen - APC",
+		"t_warehouse": "Baked Goods - APC",
+		"handling_unit": "HU-FROM",
+		"to_handling_unit": "HU-TO",
+	}
+	assert ledger_dimensions(row, "Kitchen - APC", -1) == "HU-FROM"
+
+
 # --- HU carry-forward integration tests --------------------------------------
 #
 # With carry_forward enabled, propagate_inventory_dimensions copies handling_unit →
